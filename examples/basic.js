@@ -4,9 +4,9 @@ const { EchoEntriesDB } = require('../index');
 
 async function main() {
   const db = new EchoEntriesDB({
-    email:            process.env.EE_EMAIL || 'user@example.com',
-    password:         process.env.EE_PASSWORD || 'password123',
-    encryptionSecret: process.env.EE_SECRET || 'my-private-secret',
+    email:            process.env.EE_EMAIL || 'isclaudeia+echo@gmail.com',
+    password:         process.env.EE_PASSWORD || '1234567890',
+    encryptionSecret: process.env.EE_SECRET || 'mi-secreto-privado-2026',
     walPath:          './.echodb_test_wal.json',
     autoSyncMs:       0,
     compactEvery:     50,   // high threshold so compaction doesn't fire mid-test

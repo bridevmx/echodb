@@ -2,3 +2,4 @@ node_modules/
 .echodb_wal*.json
 *.wal.json
 .env
+.npmrc

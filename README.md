@@ -1,7 +1,7 @@
 # echodb
 
-> RAM-first document database backed by **Echo Entries**.  
-> Zero-dependency · Append-only log · Atomic transactions · Auto-compaction · TypeScript types included.
+> **RAM-first document database backed by Echo Entries.**  
+> Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · TypeScript support.
 
 [![npm](https://img.shields.io/npm/v/echodb)](https://www.npmjs.com/package/echodb)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
@@ -9,20 +9,20 @@
 
 ---
 
-## What is it?
+## Features
 
-`echodb` turns your [Echo Entries](https://echo-entries.com) account into a
-cloud-persisted NoSQL document database.
-
-| Feature | Detail |
+| Feature | Description |
 |---|---|
-| **RAM-first reads** | All queries served from an in-memory Map. **0 ms**, no network. |
-| **Append-only event log** | Writes are stored as immutable entries — multiple Node.js instances write concurrently without conflicts. |
-| **Atomic transactions** | Automatic RAM rollback if any operation inside `transaction()` throws. |
-| **WAL on disk** | Write-Ahead Log guarantees zero data loss across server restarts. |
-| **Auto-compaction** | Op-entries are periodically merged into a single snapshot to keep EE storage flat. |
-| **Zero dependency** | Only Node.js built-ins (`fs`, `crypto`). No npm packages required. |
-| **TypeScript types** | Full type definitions included (`index.d.ts`). Generic per collection. |
+| ⚡ **RAM-first reads** | All queries served directly from in-memory Maps in **~0 ms**, without network roundtrips. |
+| 👤 **Built-in Registration** | Create new accounts programmatically via static `EchoEntriesDB.register()`. |
+| 🔐 **Double-Layer Encryption** | Optional end-to-end encryption layer (AES-256-GCM + PBKDF2) so not even storage admins can read data. |
+| ⚡ **Secondary Indexes $O(1)$** | Declare indexes on any collection field for instant $O(1)$ lookups. |
+| 🔍 **Chainable Query Builder** | Fluent query API supporting `.where()`, `.sortBy()`, `.limit()`, and `.offset()`. |
+| 🛡️ **Atomic Transactions** | Thread-safe, serialized transactions with automatic RAM rollback on errors. |
+| 💾 **Disk WAL Durability** | Write-Ahead Log guarantees zero data loss across process crashes or server restarts. |
+| 📦 **Auto-Compaction** | Automatically folds operation logs into consolidated snapshots to optimize cloud storage. |
+| 📦 **Zero Dependencies** | Powered purely by Node.js built-in modules (`node:crypto`, `fs`). No external npm packages. |
+| 📘 **TypeScript Support** | Full type definitions included (`index.d.ts`) with generic collection support. |
 
 ---
 
@@ -32,174 +32,324 @@ cloud-persisted NoSQL document database.
 npm install echodb
 ```
 
-**Requirements:** Node.js `>= 18` · An active [Echo Entries](https://echo-entries.com) account.
+**Requirements:** Node.js `>= 18`
 
 ---
 
-## Quick start
+## Account Registration
 
-```js
+You can create a new Echo Entries account programmatically using the static `EchoEntriesDB.register()` method without needing an existing database instance.
+
+```javascript
 const { EchoEntriesDB } = require('echodb');
 
-const db = new EchoEntriesDB({
-  email:    process.env.EE_EMAIL,
-  password: process.env.EE_PASSWORD,
-});
+async function registerAccount() {
+  try {
+    const result = await EchoEntriesDB.register({
+      email:    'newuser@example.com',
+      password: 'SecurePassword123!',
+      firstName: 'Jane',
+      lastName:  'Doe'
+    });
 
-await db.init();
+    console.log('User created:', result.user.id);
 
-const posts = db.collection('posts');
+    if (result.emailConfirmationRequired) {
+      console.log('✉️ Check your inbox and confirm your email address before logging in.');
+    } else {
+      console.log('✅ Account ready for login!');
+    }
+  } catch (err) {
+    console.error('Registration failed:', err.message);
+  }
+}
 
-// INSERT — id auto-generated (UUIDv4) if not provided
-const post = await posts.insert({ title: 'Hello world', published: false });
-
-// READS — served from RAM, ~0 ms
-posts.findById(post.id);
-posts.find(p => p.published);
-posts.findOne(p => p.title.startsWith('Hello'));
-posts.all();
-posts.count(p => !p.published);
-
-// UPDATE — shallow merge, _v increments
-await posts.update(post.id, { published: true });
-
-// UPSERT
-await posts.upsert({ id: 'slug-hello', title: 'Hello world', published: true });
-
-// DELETE
-await posts.delete(post.id);
-
-// ATOMIC TRANSACTION
-await db.transaction(async (tx) => {
-  const accounts = tx.collection('accounts');
-  const a = accounts.findById('acc_A');
-  const b = accounts.findById('acc_B');
-  if (a.balance < 100) throw new Error('Insufficient funds'); // → rollback
-  await accounts.update('acc_A', { balance: a.balance - 100 });
-  await accounts.update('acc_B', { balance: b.balance + 100 });
-});
-
-await db.close();
+registerAccount();
 ```
 
 ---
 
-## API Reference
+## Quick Start
 
-### `new EchoEntriesDB(opts)`
+```javascript
+const { EchoEntriesDB } = require('echodb');
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `email` | `string` | required | Echo Entries account email. |
-| `password` | `string` | required | Echo Entries account password. |
-| `walPath` | `string` | `./.echodb_wal.json` | Local WAL file path. |
-| `autoSyncMs` | `number` | `300000` | Periodic sync interval in ms (0 = disabled). |
-| `compactEvery` | `number` | `20` | Op-entries written before auto-compaction per collection. |
-| `requestDelayMs` | `number` | `80` | Delay between sequential HTTP requests (rate-limit safety). |
+async function main() {
+  // 1. Initialize and authenticate
+  const db = new EchoEntriesDB({
+    email:            process.env.EE_EMAIL,
+    password:         process.env.EE_PASSWORD,
+    encryptionSecret: 'my-private-encryption-key' // Optional E2EE
+  });
 
-### Engine methods
+  await db.init();
 
-| Method | Returns | Description |
-|---|---|---|
-| `db.init()` | `Promise<this>` | Authenticate, load WAL, sync from EE, drain pending ops. |
-| `db.close()` | `Promise<void>` | Flush all ops and close. |
-| `db.flush()` | `Promise<void>` | Wait until the WAL queue is fully drained. |
-| `db.sync()` | `Promise<void>` | Re-sync from EE into RAM. |
-| `db.collection(name)` | `Collection` | Get or lazily create a collection. |
-| `db.transaction(fn)` | `Promise<R>` | Atomic transaction with automatic rollback. |
+  // 2. Get a collection
+  const products = db.collection('products');
 
-### `Collection` methods
+  // 3. Declare a secondary index for O(1) lookups
+  db.createIndex('products', 'category');
 
-#### Reads (RAM, ~0 ms)
+  // 4. Insert documents
+  const item = await products.insert({
+    title:    'Wireless Mouse',
+    category: 'electronics',
+    price:    29.99,
+    stock:    100
+  });
 
-| Method | Description |
-|---|---|
-| `col.findById(id)` | Find by id. Returns `doc \| null`. |
-| `col.find(predicate?)` | Filter by predicate. Returns `doc[]`. |
-| `col.findOne(predicate)` | First match or `null`. |
-| `col.all()` | All documents. |
-| `col.count(predicate?)` | Count (optionally filtered). |
+  // 5. Read operations (~0 ms)
+  const mouse = products.findById(item.id);
+  const electronics = products.findBy('category', 'electronics'); // O(1) index lookup
 
-#### Writes (RAM-immediate + async persist to EE)
+  // 6. Chainable Query Builder
+  const deals = products
+    .where({ category: 'electronics' })
+    .sortBy('price', 'asc')
+    .limit(5)
+    .exec();
 
-| Method | Description |
-|---|---|
-| `col.insert(doc)` | Insert. Auto-generates UUIDv4 `id` if not provided. |
-| `col.update(id, updates)` | Shallow merge update. Throws if not found. |
-| `col.upsert(doc)` | Insert if not exists, update if exists. Requires `id`. |
-| `col.delete(id)` | Delete. Returns `true` if existed. |
+  // 7. Update document
+  await products.update(item.id, { stock: 95 });
 
-Every document gets automatic metadata fields:
+  // 8. Clean shutdown (flushes pending WAL ops)
+  await db.close();
+}
 
-```js
+main();
+```
+
+---
+
+## Detailed Usage Examples
+
+### 1. CRUD Operations
+
+```javascript
+const users = db.collection('users');
+
+// INSERT — auto-generates UUIDv4 id if omitted
+const user = await users.insert({
+  name: 'Alice',
+  role: 'admin',
+  age: 28
+});
+
+// READ BY ID — O(1) lookup
+const foundUser = users.findById(user.id);
+
+// READ WITH PREDICATE — O(n) scan
+const admins = users.find(u => u.role === 'admin');
+const firstAdmin = users.findOne(u => u.role === 'admin');
+const allUsers = users.all();
+const totalCount = users.count();
+
+// UPDATE — shallow merge & increments version counter (_v)
+await users.update(user.id, { age: 29 });
+
+// UPSERT — inserts if id does not exist, updates if it exists
+await users.upsert({
+  id: 'usr_custom_101',
+  name: 'Bob',
+  role: 'developer'
+});
+
+// DELETE — returns boolean
+const deleted = await users.delete(user.id);
+```
+
+Each document stored in `echodb` automatically includes system metadata fields:
+
+```json
 {
-  id:         string,   // document id
-  _v:         number,   // version (increments on each update)
-  _createdAt: string,   // ISO 8601
-  _updatedAt: string,   // ISO 8601
+  "id": "385fec34-8bfd-424f-9f59-e5f722df8be8",
+  "name": "Alice",
+  "_col": "users",
+  "_id": "385fec34-8bfd-424f-9f59-e5f722df8be8",
+  "_type": "op",
+  "_op": "INSERT",
+  "_v": 1,
+  "_eeId": "row_99218",
+  "_createdAt": "2026-09-03T18:40:00.000Z",
+  "_updatedAt": "2026-09-03T18:40:00.000Z"
 }
 ```
 
 ---
 
-## Architecture
+### 2. Secondary Indexes $O(1)$
 
-### Write path
+By default, filtering via `.find(fn)` performs a full scan over all documents in RAM. Declare secondary indexes to make exact-match lookups instantaneous ($O(1)$).
+
+```javascript
+// Declare indexes before or after inserting documents
+db.createIndex('users', 'email');
+db.createIndex('users', 'status');
+
+const users = db.collection('users');
+
+// O(1) array result lookup
+const activeUsers = users.findBy('status', 'active');
+
+// O(1) single result lookup
+const userByEmail = users.findOneBy('email', 'alice@example.com');
+```
+
+*Note: Indexes are maintained automatically during `insert()`, `update()`, `upsert()`, `delete()`, transactions, and re-syncs.*
+
+---
+
+### 3. Chainable Query Builder
+
+Use `.where()` for complex queries. The query engine automatically detects and utilizes the most selective secondary index available.
+
+```javascript
+const products = db.collection('products');
+
+db.createIndex('products', 'category');
+db.createIndex('products', 'status');
+
+// Filter, Sort, Offset, Limit
+const results = products
+  .where({ category: 'hardware', status: 'active' })
+  .sortBy('price', 'desc')
+  .offset(0)
+  .limit(10)
+  .exec();
+
+// Fetch first matching document
+const cheapest = products
+  .where({ status: 'active' })
+  .sortBy('price', 'asc')
+  .first();
+
+// Get matching count without constructing full array
+const countActive = products
+  .where({ status: 'active' })
+  .count();
+```
+
+---
+
+### 4. Atomic Transactions
+
+Transactions in `echodb` are fully atomic and thread-safe. If any operation inside the transaction block throws an error, all RAM mutations and index updates across all collections are automatically reverted.
+
+```javascript
+try {
+  await db.transaction(async (tx) => {
+    const accounts = tx.collection('accounts');
+    const logs = tx.collection('audit_logs');
+
+    const accA = accounts.findById('acc_A');
+    const accB = accounts.findById('acc_B');
+
+    if (accA.balance < 500) {
+      throw new Error('Insufficient funds'); // Triggers automatic rollback
+    }
+
+    await accounts.update('acc_A', { balance: accA.balance - 500 });
+    await accounts.update('acc_B', { balance: accB.balance + 500 });
+    await logs.insert({ type: 'transfer', amount: 500, from: 'acc_A', to: 'acc_B' });
+  });
+
+  console.log('Transaction committed successfully!');
+} catch (err) {
+  console.error('Transaction rolled back:', err.message);
+}
+```
+
+---
+
+### 5. Double-Layer End-to-End Encryption (E2EE)
+
+`echodb` provides client-side encryption using AES-256-GCM and PBKDF2 key derivation.
+
+1. **Outer Layer (Default)**: Encrypted using the `userId`. Formatted to be compatible with Echo Entries web UI.
+2. **Inner Layer (Optional `encryptionSecret`)**: Applied *before* the outer layer using your private secret key.
+
+```javascript
+const db = new EchoEntriesDB({
+  email:            process.env.EE_EMAIL,
+  password:         process.env.EE_PASSWORD,
+  encryptionSecret: 'your-super-secret-client-side-key'
+});
+```
+
+*When `encryptionSecret` is set, data is double-encrypted. Even storage cloud administrators cannot read your document contents.*
+
+---
+
+## Options & Configuration
+
+### `new EchoEntriesDB(opts)`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `email` | `string` | **required** | Echo Entries account email. |
+| `password` | `string` | **required** | Echo Entries account password. |
+| `encryptionSecret` | `string` | `null` | Extra secret key for double-layer E2EE encryption. |
+| `walPath` | `string` | `'./.echodb_wal.json'` | Local disk path for the Write-Ahead Log file. |
+| `autoSyncMs` | `number` | `300000` | Periodical sync interval from cloud in ms (`0` = disabled). |
+| `compactEvery` | `number` | `20` | Ops threshold per collection to trigger auto-compaction. |
+| `batchSize` | `number` | `10` | Maximum parallel requests per background drain cycle. |
+| `batchWindowMs` | `number` | `8` | Ms window to accumulate writes before firing background batch. |
+
+---
+
+## TypeScript Usage
+
+`echodb` ships with complete type definitions (`index.d.ts`).
+
+```typescript
+import EchoEntriesDB, { Collection, DocMeta } from 'echodb';
+
+interface Product {
+  name: string;
+  price: number;
+  stock: number;
+  category: string;
+}
+
+async function run() {
+  const db = new EchoEntriesDB({
+    email: 'user@example.com',
+    password: 'password123'
+  });
+
+  await db.init();
+
+  // Strongly typed collection
+  const products: Collection<Product> = db.collection<Product>('products');
+
+  // Insert typed document
+  const doc = await products.insert({
+    name: 'Keyboard',
+    price: 49.99,
+    stock: 20,
+    category: 'tech'
+  });
+
+  // Typed results include DocMeta metadata (_id, _v, _createdAt, etc.)
+  const item: (Product & DocMeta) | null = products.findById(doc.id);
+  console.log(item?.name, item?._v);
+}
+```
+
+---
+
+## Architecture Overview
 
 ```
 col.insert(doc)
   │
-  ├── 1. Apply to RAM Map immediately  (0 ms)
-  ├── 2. Push to WAL on disk           (sync write, ~0.1 ms)
+  ├── 1. Apply to RAM Map immediately  (~0 ms)
+  ├── 2. Push to local WAL on disk     (sync write, ~0.1 ms)
   └── 3. Background drain:
-           POST to Echo Entries        (~100 ms, non-blocking)
-           Every 20 ops → compact:
-             PATCH snapshot row
-             DELETE old op-entries
-```
-
-### Sync path (on `init()` / `db.sync()`)
-
-```
-GET all journal_entries (paginated, 1000/page)
-  │
-  ├── Find latest snapshot per collection → load docs into RAM
-  └── Replay op-entries newer than snapshot → apply in creation order
-```
-
-### Compaction
-
-Every `compactEvery` writes (default: 20), the engine:
-
-1. Writes (or patches) a single **snapshot** entry containing all current documents.
-2. Deletes all op-entries now folded into the snapshot.
-
-This keeps the total number of EE rows constant regardless of write volume.
-
----
-
-## Ideal use cases
-
-✅ Blog / portfolio / headless CMS  
-✅ App configuration stored in the cloud  
-✅ Personal or small-team tools  
-✅ MVPs that need cloud persistence without a dedicated database  
-
----
-
-## Environment variables (recommended)
-
-```bash
-# .env
-EE_EMAIL=your@email.com
-EE_PASSWORD=yourpassword
-```
-
-```js
-const db = new EchoEntriesDB({
-  email:    process.env.EE_EMAIL,
-  password: process.env.EE_PASSWORD,
-});
+           POST to Echo Entries in parallel batches
+           When ops threshold reached → Compact:
+             PATCH single snapshot entry
+             DELETE obsolete op-entries
 ```
 
 ---
