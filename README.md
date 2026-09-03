@@ -3,7 +3,7 @@
 > **RAM-first document database backed by Echo Entries.**  
 > Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · TypeScript support.
 
-[![npm](https://img.shields.io/npm/v/echodb)](https://www.npmjs.com/package/echodb)
+[![npm](https://img.shields.io/npm/v/@bridevmx/echodb)](https://www.npmjs.com/package/@bridevmx/echodb)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -29,7 +29,7 @@
 ## Installation
 
 ```bash
-npm install echodb
+npm install @bridevmx/echodb
 ```
 
 **Requirements:** Node.js `>= 18`
@@ -41,7 +41,7 @@ npm install echodb
 You can create a new Echo Entries account programmatically using the static `EchoEntriesDB.register()` method without needing an existing database instance.
 
 ```javascript
-const { EchoEntriesDB } = require('echodb');
+const { EchoEntriesDB } = require('@bridevmx/echodb');
 
 async function registerAccount() {
   try {
@@ -72,7 +72,7 @@ registerAccount();
 ## Quick Start
 
 ```javascript
-const { EchoEntriesDB } = require('echodb');
+const { EchoEntriesDB } = require('@bridevmx/echodb');
 
 async function main() {
   // 1. Initialize and authenticate
@@ -302,7 +302,7 @@ const db = new EchoEntriesDB({
 `echodb` ships with complete type definitions (`index.d.ts`).
 
 ```typescript
-import EchoEntriesDB, { Collection, DocMeta } from 'echodb';
+import EchoEntriesDB, { Collection, DocMeta } from '@bridevmx/echodb';
 
 interface Product {
   name: string;

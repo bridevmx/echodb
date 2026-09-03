@@ -1,6 +1,6 @@
 {
-  "name": "echodb",
-  "version": "1.0.0",
+  "name": "@bridevmx/echodb",
+  "version": "1.0.1",
   "description": "RAM-first document database backed by Echo Entries. Zero-dependency, append-only, atomic transactions, auto-compaction.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -15,7 +15,9 @@
     "index.d.ts",
     "src/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SKILL.md",
+    "skills/"
   ],
   "engines": { "node": ">=18.0.0" },
   "scripts": {
@@ -39,7 +41,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bridevmx/echodb"
+    "url": "git+https://github.com/bridevmx/echodb.git"
   },
   "bugs": { "url": "https://github.com/bridevmx/echodb/issues" },
   "homepage": "https://github.com/bridevmx/echodb#readme",
