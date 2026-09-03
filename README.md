@@ -1,9 +1,9 @@
-# @isclaudeia/echo-entries-db
+# echodb
 
 > RAM-first document database backed by **Echo Entries**.  
 > Zero-dependency · Append-only log · Atomic transactions · Auto-compaction · TypeScript types included.
 
-[![npm](https://img.shields.io/npm/v/@isclaudeia/echo-entries-db)](https://www.npmjs.com/package/@isclaudeia/echo-entries-db)
+[![npm](https://img.shields.io/npm/v/echodb)](https://www.npmjs.com/package/echodb)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -11,7 +11,7 @@
 
 ## What is it?
 
-`@isclaudeia/echo-entries-db` turns your [Echo Entries](https://echo-entries.com) account into a
+`echodb` turns your [Echo Entries](https://echo-entries.com) account into a
 cloud-persisted NoSQL document database.
 
 | Feature | Detail |
@@ -29,7 +29,7 @@ cloud-persisted NoSQL document database.
 ## Installation
 
 ```bash
-npm install @isclaudeia/echo-entries-db
+npm install echodb
 ```
 
 **Requirements:** Node.js `>= 18` · An active [Echo Entries](https://echo-entries.com) account.
@@ -39,7 +39,7 @@ npm install @isclaudeia/echo-entries-db
 ## Quick start
 
 ```js
-const { EchoEntriesDB } = require('@isclaudeia/echo-entries-db');
+const { EchoEntriesDB } = require('echodb');
 
 const db = new EchoEntriesDB({
   email:    process.env.EE_EMAIL,
@@ -206,4 +206,4 @@ const db = new EchoEntriesDB({
 
 ## License
 
-[MIT](./LICENSE) © 2026 isclaudeia
+[MIT](./LICENSE) © 2026 EchoDB Contributors

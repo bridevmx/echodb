@@ -1,7 +1,7 @@
 {
-  "name": "@isclaudeia/echo-entries-db",
+  "name": "echodb",
   "version": "1.0.0",
-  "description": "RAM-first document database backed by Echo Entries (Supabase). Zero-dependency, append-only, atomic transactions, auto-compaction.",
+  "description": "RAM-first document database backed by Echo Entries. Zero-dependency, append-only, atomic transactions, auto-compaction.",
   "main": "index.js",
   "types": "index.d.ts",
   "exports": {
@@ -22,6 +22,7 @@
     "test": "node examples/basic.js"
   },
   "keywords": [
+    "echodb",
     "echo-entries",
     "supabase",
     "nosql",
@@ -34,13 +35,13 @@
     "headless-cms",
     "zero-dependency"
   ],
-  "author": "isclaudeia",
+  "author": "EchoDB Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/isclaudeia/echo-entries-db"
+    "url": "https://github.com/bridevmx/echodb"
   },
-  "bugs": { "url": "https://github.com/isclaudeia/echo-entries-db/issues" },
-  "homepage": "https://github.com/isclaudeia/echo-entries-db#readme",
+  "bugs": { "url": "https://github.com/bridevmx/echodb/issues" },
+  "homepage": "https://github.com/bridevmx/echodb#readme",
   "dependencies": {}
 }

@@ -1,4 +1,4 @@
-// Type definitions for @isclaudeia/echo-entries-db
+// Type definitions for echodb
 
 export interface EchoEntriesDBOptions {
   /** Echo Entries account email */
