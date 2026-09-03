@@ -1,11 +1,11 @@
 ---
 name: echodb
-description: Expert integration and usage guide for EchoDB (@bridevmx/echodb), a zero-dependency, RAM-first document database backed by Echo Entries with O(1) in-memory lookups, disk Write-Ahead Log (WAL) durability, atomic transactions, secondary indexes, double-layer E2EE encryption, and automated compaction.
+description: Expert integration and usage guide for EchoDB (@bridevmx/echodb), a zero-dependency, RAM-first document database backed by Echo Entries with O(1) in-memory lookups, disk Write-Ahead Log (WAL) durability, atomic transactions, secondary indexes, JSON import/export, double-layer E2EE encryption, and automated compaction.
 license: MIT
 compatibility: Works with any AI coding agent. Requires Node.js >= 18.
 metadata:
   package: "@bridevmx/echodb"
-  version: "1.0.1"
+  version: "1.1.0"
   repository: https://github.com/bridevmx/echodb
   npm: https://www.npmjs.com/package/@bridevmx/echodb
 ---
@@ -256,7 +256,52 @@ try {
 
 ---
 
-## 8. TypeScript Usage Example
+## 8. Export & Import JSON
+
+EchoDB supports atomic multi-collection and single-collection JSON serialization and deserialization.
+
+### Database-Level Export & Import
+```javascript
+// Export all collections to a formatted JSON string
+const jsonString = db.exportJSON({ pretty: true });
+
+// Export without system metadata (_col, _v, etc.) or for specific collections
+const cleanExport = db.exportJSON({
+  collections: ['users', 'products'],
+  excludeMeta: true,
+  stringify: false // returns JS object instead of JSON string
+});
+
+// Atomic Multi-Collection Import (Runs inside a single transaction)
+const result = await db.importJSON(jsonString, { mode: 'upsert' });
+console.log(`Imported ${result.total} documents across ${Object.keys(result.imported).length} collections.`);
+```
+
+### Collection-Level Export, Import & Clear
+```javascript
+const users = db.collection('users');
+
+// Export single collection
+const usersBackup = users.exportJSON({ pretty: true, excludeMeta: true });
+
+// Import array of documents with overwrite mode (clears existing documents first)
+await users.importJSON(usersBackup, { mode: 'overwrite' });
+
+// Clear all documents in collection
+const deletedCount = await users.clear();
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `mode` | `'upsert' \| 'overwrite' \| 'insert'` | `'upsert'` | Import strategy. |
+| `collections` | `string[]` | all | Subset of collection names to export or import. |
+| `pretty` | `boolean` | `false` | Format JSON with 2-space indentation. |
+| `stringify` | `boolean` | `true` | Return JSON string if `true`, JS object if `false`. |
+| `excludeMeta` | `boolean` | `false` | Strip internal metadata (`_col`, `_v`, `_eeId`, etc.). |
+
+---
+
+## 9. TypeScript Usage Example
 
 ```typescript
 import EchoEntriesDB, { Collection, DocMeta } from '@bridevmx/echodb';

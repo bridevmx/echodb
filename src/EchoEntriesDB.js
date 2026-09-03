@@ -131,16 +131,22 @@ class EchoEntriesDB {
   }
 
   async close() {
-    if (this._syncTimer)  clearInterval(this._syncTimer);
-    if (this._batchTimer) clearTimeout(this._batchTimer);
+    if (this._syncTimer) {
+      clearInterval(this._syncTimer);
+      this._syncTimer = null;
+    }
     await this.flush();
     this._wal.clear();
     console.log('[EchoEntriesDB] Closed.');
   }
 
   async flush() {
-    // Wait for the batch window + drain to fully empty
-    while (this._wal.length > 0 || this._draining || this._batchTimer) {
+    if (this._batchTimer) {
+      clearTimeout(this._batchTimer);
+      this._batchTimer = null;
+      await this._drain();
+    }
+    while (this._wal.length > 0 || this._draining) {
       await sleep(20);
     }
   }
@@ -245,6 +251,82 @@ class EchoEntriesDB {
     const next = this._txQueue.then(execute, execute);
     this._txQueue = next.catch(() => {});
     return next;
+  }
+
+  /**
+   * Export all (or selected) database collections to JSON.
+   *
+   * @param {object} [opts]
+   * @param {string[]} [opts.collections]      Subset of collection names to export (default: all)
+   * @param {boolean}  [opts.pretty=false]     Format JSON with 2-space indentation
+   * @param {boolean}  [opts.stringify=true]    Return JSON string (true) or plain JS object (false)
+   * @param {boolean}  [opts.excludeMeta=false] Omit system metadata fields (_col, _v, etc.)
+   * @returns {string|object}
+   */
+  exportJSON(opts = {}) {
+    const stringify   = opts.stringify !== false;
+    const pretty      = Boolean(opts.pretty);
+    const excludeMeta = Boolean(opts.excludeMeta);
+    const filterCols  = Array.isArray(opts.collections) ? new Set(opts.collections) : null;
+
+    const collectionsObj = {};
+    for (const [colName, store] of this._stores) {
+      if (filterCols && !filterCols.has(colName)) continue;
+      collectionsObj[colName] = [...store.values()].map(doc => {
+        if (!excludeMeta) return { ...doc };
+        const { _col, _id, _type, _op, _v, _eeId, _createdAt, _updatedAt, ...clean } = doc;
+        return clean;
+      });
+    }
+
+    const payload = {
+      version:     1,
+      exportedAt:  new Date().toISOString(),
+      collections: collectionsObj
+    };
+
+    return stringify ? JSON.stringify(payload, null, pretty ? 2 : undefined) : payload;
+  }
+
+  /**
+   * Atomically import JSON database dump across one or multiple collections.
+   * Runs inside an atomic transaction — full rollback if any error occurs.
+   *
+   * @param {string|object} data - JSON string or object { collections: { colName: doc[] } } or { colName: doc[] }
+   * @param {object} [opts]
+   * @param {'upsert'|'overwrite'|'insert'} [opts.mode='upsert']
+   * @param {string[]} [opts.collections] - Optional subset of collections to import
+   * @returns {Promise<{imported: Record<string, number>, total: number}>}
+   */
+  async importJSON(data, opts = {}) {
+    const mode       = opts.mode ?? 'upsert';
+    const filterCols = Array.isArray(opts.collections) ? new Set(opts.collections) : null;
+
+    let parsed = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('[EchoEntriesDB] importJSON() invalid payload.');
+    }
+
+    const collectionsSource = parsed.collections && typeof parsed.collections === 'object' && !Array.isArray(parsed.collections)
+      ? parsed.collections
+      : parsed;
+
+    return this.transaction(async (tx) => {
+      const imported = {};
+      let total = 0;
+
+      for (const [colName, docs] of Object.entries(collectionsSource)) {
+        if (filterCols && !filterCols.has(colName)) continue;
+        if (!Array.isArray(docs)) continue;
+
+        const col = tx.collection(colName);
+        const result = await col.importJSON(docs, { mode });
+        imported[colName] = result.imported;
+        total += result.imported;
+      }
+
+      return { imported, total };
+    });
   }
 
   async sync() {

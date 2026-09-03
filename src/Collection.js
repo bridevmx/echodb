@@ -151,6 +151,83 @@ class Collection {
     return true;
   }
 
+  /**
+   * Delete all documents in this collection.
+   * @returns {Promise<number>} Number of deleted documents.
+   */
+  async clear() {
+    const docs = [...this._store.values()];
+    for (const doc of docs) {
+      await this.delete(doc.id);
+    }
+    return docs.length;
+  }
+
+  /**
+   * Export this collection's documents.
+   * @param {object} [opts]
+   * @param {boolean} [opts.pretty=false]      Format JSON with 2 spaces
+   * @param {boolean} [opts.stringify=true]     Return JSON string (true) or JS object (false)
+   * @param {boolean} [opts.excludeMeta=false]  Omit system metadata fields (_col, _v, etc.)
+   * @returns {string|object}
+   */
+  exportJSON(opts = {}) {
+    const stringify   = opts.stringify !== false;
+    const pretty      = Boolean(opts.pretty);
+    const excludeMeta = Boolean(opts.excludeMeta);
+
+    const docs = [...this._store.values()].map(doc => {
+      if (!excludeMeta) return { ...doc };
+      const { _col, _id, _type, _op, _v, _eeId, _createdAt, _updatedAt, ...clean } = doc;
+      return clean;
+    });
+
+    const payload = {
+      collection: this.name,
+      count:      docs.length,
+      exportedAt: new Date().toISOString(),
+      documents:  docs
+    };
+
+    return stringify ? JSON.stringify(payload, null, pretty ? 2 : undefined) : payload;
+  }
+
+  /**
+   * Import documents into this collection.
+   * @param {string|Array<object>|{documents: Array<object>}} data
+   * @param {object} [opts]
+   * @param {'upsert'|'overwrite'|'insert'} [opts.mode='upsert']
+   * @returns {Promise<{imported: number}>}
+   */
+  async importJSON(data, opts = {}) {
+    const mode = opts.mode ?? 'upsert';
+    let parsed = typeof data === 'string' ? JSON.parse(data) : data;
+    if (parsed && Array.isArray(parsed.documents)) {
+      parsed = parsed.documents;
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(`[EchoEntriesDB] importJSON() expected an array of documents or { documents: [...] } for collection '${this.name}'.`);
+    }
+
+    if (mode === 'overwrite') {
+      await this.clear();
+    }
+
+    let count = 0;
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      if (mode === 'insert') {
+        await this.insert(item);
+      } else {
+        const id = item.id ?? item._id ?? crypto.randomUUID();
+        await this.upsert({ ...item, id });
+      }
+      count++;
+    }
+
+    return { imported: count };
+  }
+
   // ── Index maintenance ─────────────────────────────────────────────────────
 
   _indexAdd(doc) {

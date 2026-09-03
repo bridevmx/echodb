@@ -60,6 +60,51 @@ export class Query<T extends Record<string, unknown>> {
   count(): number;
 }
 
+export interface ExportOptions {
+  /** Filter specific collection names to export (default: all) */
+  collections?: string[];
+  /** Format JSON output with 2-space indentation (default: false) */
+  pretty?: boolean;
+  /** Return a JSON string if true, or a plain JavaScript object if false (default: true) */
+  stringify?: boolean;
+  /** Strip internal metadata fields (_col, _v, _createdAt, etc.) from exported documents (default: false) */
+  excludeMeta?: boolean;
+}
+
+export interface ImportOptions {
+  /**
+   * Import strategy:
+   * - 'upsert': insert new, update existing (default)
+   * - 'overwrite': clear collection before importing
+   * - 'insert': insert only (throws error if document already exists)
+   */
+  mode?: 'upsert' | 'overwrite' | 'insert';
+  /** Optional subset of collection names to import */
+  collections?: string[];
+}
+
+export interface CollectionExportResult<T = Record<string, unknown>> {
+  collection: string;
+  count: number;
+  exportedAt: string;
+  documents: (T & DocMeta)[] | Partial<T>[];
+}
+
+export interface DatabaseExportResult {
+  version: number;
+  exportedAt: string;
+  collections: Record<string, DocMeta[] | Record<string, unknown>[]>;
+}
+
+export interface DatabaseImportResult {
+  imported: Record<string, number>;
+  total: number;
+}
+
+export interface CollectionImportResult {
+  imported: number;
+}
+
 // ── Collection ────────────────────────────────────────────────────────────────
 
 export class Collection<T extends Record<string, unknown> = Record<string, unknown>> {
@@ -96,6 +141,18 @@ export class Collection<T extends Record<string, unknown> = Record<string, unkno
   update(id: string, updates: Partial<T>): Promise<T & DocMeta>;
   upsert(doc: Partial<T> & { id: string }): Promise<T & DocMeta>;
   delete(id: string): Promise<boolean>;
+
+  /** Delete all documents in this collection. Returns count of deleted documents. */
+  clear(): Promise<number>;
+
+  /** Export this collection to JSON string or object. */
+  exportJSON(opts?: Omit<ExportOptions, 'collections'>): string | CollectionExportResult<T>;
+
+  /** Import documents into this collection. */
+  importJSON(
+    data: string | (Partial<T> & { id?: string })[] | { documents: (Partial<T> & { id?: string })[] },
+    opts?: ImportOptions
+  ): Promise<CollectionImportResult>;
 }
 
 export interface RegisterOptions {
@@ -168,6 +225,19 @@ export class EchoEntriesDB {
    * WAL ops are only committed on success.
    */
   transaction<R>(fn: (db: EchoEntriesDB) => Promise<R>): Promise<R>;
+
+  /**
+   * Export all (or selected) database collections to JSON string or object.
+   */
+  exportJSON(opts?: ExportOptions): string | DatabaseExportResult;
+
+  /**
+   * Atomically import JSON database dump across one or multiple collections.
+   */
+  importJSON(
+    data: string | DatabaseExportResult | Record<string, (Record<string, unknown> & { id?: string })[]>,
+    opts?: ImportOptions
+  ): Promise<DatabaseImportResult>;
 }
 
 export default EchoEntriesDB;

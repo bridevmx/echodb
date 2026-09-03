@@ -280,6 +280,52 @@ const db = new EchoEntriesDB({
 
 ---
 
+### 6. Export & Import JSON
+
+You can export and import the entire database or individual collections to/from JSON with full atomicity and secondary index synchronization.
+
+#### Exporting to JSON
+
+```javascript
+// 1. Export entire database to formatted JSON string
+const dbDump = db.exportJSON({ pretty: true });
+
+// 2. Export specific collections without internal metadata
+const productsDump = db.exportJSON({
+  collections: ['products', 'categories'],
+  excludeMeta: true,
+  pretty: true
+});
+
+// 3. Export single collection
+const usersCollection = db.collection('users');
+const usersJson = usersCollection.exportJSON({ pretty: true, excludeMeta: true });
+```
+
+#### Importing from JSON
+
+```javascript
+// 1. Multi-collection atomic import (upsert mode by default)
+const result = await db.importJSON(dbDump, { mode: 'upsert' });
+console.log(`Imported ${result.total} documents across collections.`);
+
+// 2. Overwrite collection mode (clears existing documents first)
+await usersCollection.importJSON(usersJson, { mode: 'overwrite' });
+
+// 3. Clear all documents in a collection
+const deletedCount = await usersCollection.clear();
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `mode` | `'upsert' \| 'overwrite' \| 'insert'` | `'upsert'` | Import strategy. |
+| `collections` | `string[]` | all | Subset of collection names to export or import. |
+| `pretty` | `boolean` | `false` | Format JSON with 2-space indentation. |
+| `stringify` | `boolean` | `true` | Return JSON string if `true`, JS object if `false`. |
+| `excludeMeta` | `boolean` | `false` | Strip internal metadata (`_col`, `_v`, `_eeId`, etc.). |
+
+---
+
 ## Options & Configuration
 
 ### `new EchoEntriesDB(opts)`
