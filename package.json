@@ -1,12 +1,14 @@
 {
   "name": "@bridevmx/echodb",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "RAM-first document database backed by Echo Entries. Zero-dependency, append-only, atomic transactions, auto-compaction.",
   "main": "index.js",
   "types": "index.d.ts",
   "exports": {
     ".": {
+      "import": "./index.js",
       "require": "./index.js",
+      "default": "./index.js",
       "types": "./index.d.ts"
     }
   },

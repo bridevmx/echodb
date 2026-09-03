@@ -1,10 +1,23 @@
 // Type definitions for echodb
 
 export interface EchoEntriesDBOptions {
-  /** Echo Entries account email */
-  email: string;
-  /** Echo Entries account password */
-  password: string;
+  /**
+   * Echo Entries account email.
+   * Not required when `memoryOnly: true`.
+   */
+  email?: string;
+  /**
+   * Echo Entries account password.
+   * Not required when `memoryOnly: true`.
+   */
+  password?: string;
+  /**
+   * Run entirely in RAM without any network calls, WAL, or authentication.
+   * Ideal for unit tests, CI/CD pipelines, and offline development.
+   * All collection, transaction, exportJSON, and importJSON APIs work normally.
+   * Default: false
+   */
+  memoryOnly?: boolean;
   /**
    * Optional extra secret for the inner encryption layer.
    * When provided, data is encrypted twice:
@@ -18,7 +31,7 @@ export interface EchoEntriesDBOptions {
   autoSyncMs?: number;
   /** Op-entries before automatic compaction per collection. Default: 20 */
   compactEvery?: number;
-  /** Max parallel POSTs per drain cycle. Default: 10 */
+  /** Max ops per bulk POST to Echo Entries. Default: 10 */
   batchSize?: number;
   /** Ms to wait for more ops to accumulate before firing a batch. Default: 8 */
   batchWindowMs?: number;

@@ -1,7 +1,7 @@
 # echodb
 
 > **RAM-first document database backed by Echo Entries.**  
-> Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · TypeScript support.
+> Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · Offline/CI mode · TypeScript support.
 
 [![npm](https://img.shields.io/npm/v/@bridevmx/echodb)](https://www.npmjs.com/package/@bridevmx/echodb)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
@@ -20,7 +20,9 @@
 | 🔍 **Chainable Query Builder** | Fluent query API supporting `.where()`, `.sortBy()`, `.limit()`, and `.offset()`. |
 | 🛡️ **Atomic Transactions** | Thread-safe, serialized transactions with automatic RAM rollback on errors. |
 | 💾 **Disk WAL Durability** | Write-Ahead Log guarantees zero data loss across process crashes or server restarts. |
+| 📦 **Bulk Writes** | Entire batch of ops flushed in a single HTTP request to Echo Entries (PostgREST bulk insert). |
 | 📦 **Auto-Compaction** | Automatically folds operation logs into consolidated snapshots to optimize cloud storage. |
+| 🧪 **Offline / CI mode** | `memoryOnly: true` runs 100% in RAM — no credentials, no network, no WAL. Perfect for tests. |
 | 📦 **Zero Dependencies** | Powered purely by Node.js built-in modules (`node:crypto`, `fs`). No external npm packages. |
 | 📘 **TypeScript Support** | Full type definitions included (`index.d.ts`) with generic collection support. |
 
@@ -33,6 +35,8 @@ npm install @bridevmx/echodb
 ```
 
 **Requirements:** Node.js `>= 18`
+
+> **ESM & CommonJS:** The package ships a single `index.js` and exposes both `import` and `require` entry-points in `package.json`, so it works out-of-the-box in CJS (`require`) and ESM (`import`) projects without any extra configuration.
 
 ---
 
@@ -280,7 +284,37 @@ const db = new EchoEntriesDB({
 
 ---
 
-### 6. Export & Import JSON
+### 6. Offline / CI Mode (`memoryOnly`)
+
+Pass `memoryOnly: true` to run entirely in RAM — no credentials, no network calls, no WAL file, no auth.  
+All APIs (`collection`, `transaction`, `exportJSON`, `importJSON`) work identically.
+
+```javascript
+const { EchoEntriesDB } = require('@bridevmx/echodb');
+
+const db = new EchoEntriesDB({ memoryOnly: true });
+await db.init(); // returns immediately, no network
+
+const tasks = db.collection('tasks');
+await tasks.insert({ title: 'Write tests', done: false });
+
+const pending = tasks.find(t => !t.done);
+console.log(pending); // works fully in RAM
+
+await db.close(); // instant, no flush
+```
+
+**Use cases:**
+- Unit tests and integration tests (Jest, Vitest, Mocha) — process exits cleanly without `process.exit()`
+- CI/CD pipelines without real credentials
+- Local offline development and prototyping
+- Seeding scripts that export JSON for later import
+
+> When `memoryOnly: true` is set, `email` and `password` are not required.
+
+---
+
+### 7. Export & Import JSON
 
 You can export and import the entire database or individual collections to/from JSON with full atomicity and secondary index synchronization.
 
@@ -332,14 +366,17 @@ const deletedCount = await usersCollection.clear();
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `email` | `string` | **required** | Echo Entries account email. |
-| `password` | `string` | **required** | Echo Entries account password. |
+| `email` | `string` | required* | Echo Entries account email. |
+| `password` | `string` | required* | Echo Entries account password. |
+| `memoryOnly` | `boolean` | `false` | Run 100% in RAM — no auth, no WAL, no network. `email`/`password` not needed. |
 | `encryptionSecret` | `string` | `null` | Extra secret key for double-layer E2EE encryption. |
 | `walPath` | `string` | `'./.echodb_wal.json'` | Local disk path for the Write-Ahead Log file. |
 | `autoSyncMs` | `number` | `300000` | Periodical sync interval from cloud in ms (`0` = disabled). |
 | `compactEvery` | `number` | `20` | Ops threshold per collection to trigger auto-compaction. |
-| `batchSize` | `number` | `10` | Maximum parallel requests per background drain cycle. |
+| `batchSize` | `number` | `10` | Maximum ops per bulk POST to Echo Entries. |
 | `batchWindowMs` | `number` | `8` | Ms window to accumulate writes before firing background batch. |
+
+*`email` and `password` are required unless `memoryOnly: true`.
 
 ---
 
@@ -391,12 +428,14 @@ col.insert(doc)
   │
   ├── 1. Apply to RAM Map immediately  (~0 ms)
   ├── 2. Push to local WAL on disk     (sync write, ~0.1 ms)
-  └── 3. Background drain:
-           POST to Echo Entries in parallel batches
+  └── 3. Background drain (batch window):
+           Single bulk POST → Echo Entries (N rows in 1 HTTP request)
            When ops threshold reached → Compact:
              PATCH single snapshot entry
-             DELETE obsolete op-entries
+             DELETE obsolete op-entries in parallel
 ```
+
+> In `memoryOnly` mode, steps 2 and 3 are skipped entirely.
 
 ---
 

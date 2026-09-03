@@ -33,19 +33,22 @@ function makeTimestamp() {
 class EchoEntriesDB {
   /**
    * @param {object} opts
-   * @param {string}  opts.email
-   * @param {string}  opts.password
+   * @param {string}  [opts.email]
+   * @param {string}  [opts.password]
+   * @param {boolean} [opts.memoryOnly=false]      offline/CI mode — no network, no WAL, no auth
    * @param {string}  [opts.encryptionSecret]   inner encryption layer
    * @param {string}  [opts.walPath]
    * @param {number}  [opts.autoSyncMs]          0 = off
    * @param {number}  [opts.compactEvery]        ops before auto-compaction per col
-   * @param {number}  [opts.batchSize]           max parallel POSTs per cycle
+   * @param {number}  [opts.batchSize]           max ops per bulk POST
    * @param {number}  [opts.batchWindowMs]       ms to accumulate ops before firing
    * @param {number}  [opts.requestDelayMs]      legacy single-op delay (ignored in batch mode)
    */
   constructor(opts = {}) {
-    if (!opts.email || !opts.password) {
-      throw new Error('[EchoEntriesDB] opts.email and opts.password are required.');
+    this._memoryOnly = Boolean(opts.memoryOnly);
+
+    if (!this._memoryOnly && (!opts.email || !opts.password)) {
+      throw new Error('[EchoEntriesDB] opts.email and opts.password are required (or set memoryOnly: true for offline mode).');
     }
 
     this._email            = opts.email;
@@ -109,6 +112,10 @@ class EchoEntriesDB {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   async init() {
+    if (this._memoryOnly) {
+      console.log('[EchoEntriesDB] memoryOnly mode — skipping auth, WAL and network sync.');
+      return this;
+    }
     console.log('[EchoEntriesDB] Initializing...');
     const authData = await this._http.login(this._email, this._password);
     this._userId = authData.user?.id;
@@ -124,6 +131,9 @@ class EchoEntriesDB {
 
     if (this._autoSyncMs > 0) {
       this._syncTimer = setInterval(() => this.sync().catch(console.error), this._autoSyncMs);
+      // .unref() prevents the timer from keeping the Node.js process alive in
+      // CLI scripts and test runners (Jest, Vitest, Mocha) that don't call close().
+      if (typeof this._syncTimer.unref === 'function') this._syncTimer.unref();
     }
 
     console.log('[EchoEntriesDB] Ready.');
@@ -135,7 +145,7 @@ class EchoEntriesDB {
       clearInterval(this._syncTimer);
       this._syncTimer = null;
     }
-    await this.flush();
+    if (!this._memoryOnly) await this.flush();
     this._wal.clear();
     console.log('[EchoEntriesDB] Closed.');
   }
@@ -363,6 +373,9 @@ class EchoEntriesDB {
   // Result: N ops take ~same wall-clock time as 1 op (bounded by batchSize).
 
   _enqueue(op) {
+    // In memoryOnly mode ops are applied to RAM only — no WAL, no network drain
+    if (this._memoryOnly) return;
+
     this._wal.push(op);
 
     // Schedule a drain after the batch window if not already scheduled
@@ -419,8 +432,9 @@ class EchoEntriesDB {
   // ── Echo Entries persistence ───────────────────────────────────────────────
 
   /**
-   * Persist a batch of ops to EE in parallel.
-   * Encrypt all in parallel, then POST all in parallel.
+   * Persist a batch of ops to EE in a single bulk POST request.
+   * PostgREST accepts a JSON array body and returns one row per inserted entry,
+   * reducing N round-trips to exactly 1 regardless of batch size.
    */
   async _persistBatch(ops) {
     // Step 1: encrypt all ops in parallel
@@ -435,7 +449,7 @@ class EchoEntriesDB {
       }))
     );
 
-    // Step 2: POST all to EE in parallel
+    // Step 2: single bulk POST — PostgREST accepts a JSON array of rows
     const bodies = encrypted.map(entryText => ({
       user_id:           this._userId,
       entry_text:        entryText,
@@ -445,14 +459,13 @@ class EchoEntriesDB {
       timestamp_started: makeTimestamp()
     }));
 
-    const results = await Promise.all(
-      bodies.map(body => this._http.request('POST', '', body))
-    );
+    const { data } = await this._http.request('POST', '', bodies);
 
-    // Step 3: backfill EE row ids in RAM
+    // Step 3: backfill EE row ids in RAM (bulk response is an ordered array)
+    const rows = Array.isArray(data) ? data : (data ? [data] : []);
     for (let i = 0; i < ops.length; i++) {
       const op  = ops[i];
-      const row = Array.isArray(results[i].data) ? results[i].data[0] : results[i].data;
+      const row = rows[i];
       if (!row?.id) continue;
 
       const ids = this._opEeIds.get(op.col) ?? [];

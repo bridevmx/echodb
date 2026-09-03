@@ -151,9 +151,15 @@ class HttpClient {
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      const err = new Error(
-        `[EchoEntriesDB] HTTP ${res.status}: ${data?.message || data?.error || text}`
-      );
+      // Supabase PostgREST errors: data.message | data.error
+      // GoTrue (Auth) errors:      data.msg | data.error_description
+      const msg =
+        data?.message          ||
+        data?.msg              ||
+        data?.error_description||
+        data?.error            ||
+        text;
+      const err = new Error(`[EchoEntriesDB] HTTP ${res.status}: ${msg}`);
       err.status = res.status;
       err.data = data;
       throw err;
