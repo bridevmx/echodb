@@ -39,11 +39,11 @@ async function runTests() {
   db.createIndex('users', 'email');
   db.createIndex('products', 'category');
 
-  await users.insert({ id: 'u1', name: 'Alice', email: 'alice@test.com', role: 'admin' });
-  await users.insert({ id: 'u2', name: 'Bob',   email: 'bob@test.com',   role: 'dev' });
+  await users.insert({ id: 'usr000000000001', name: 'Alice', email: 'alice@test.com', role: 'admin' });
+  await users.insert({ id: 'usr000000000002', name: 'Bob',   email: 'bob@test.com',   role: 'dev' });
 
-  await products.insert({ id: 'p1', title: 'Laptop', category: 'electronics', price: 999 });
-  await products.insert({ id: 'p2', title: 'Desk',   category: 'furniture',   price: 250 });
+  await products.insert({ id: 'prd000000000001', title: 'Laptop', category: 'electronics', price: 999 });
+  await products.insert({ id: 'prd000000000002', title: 'Desk',   category: 'furniture',   price: 250 });
 
   // ── Test 1: Collection.exportJSON() ─────────────────────────────────────────
   console.log('✔ Test 1: Collection.exportJSON() (string & object modes)');
@@ -53,13 +53,13 @@ async function runTests() {
   assert.strictEqual(colParsed.collection, 'users');
   assert.strictEqual(colParsed.count, 2);
   assert.strictEqual(colParsed.documents.length, 2);
-  assert.strictEqual(colParsed.documents[0]._col, 'users');
+  assert(colParsed.documents[0].created !== undefined);
+  assert(colParsed.documents[0].updated !== undefined);
 
   const colObj = users.exportJSON({ stringify: false, excludeMeta: true });
   assert.strictEqual(typeof colObj, 'object');
   assert.strictEqual(colObj.documents[0].name, 'Alice');
-  assert.strictEqual(colObj.documents[0]._col, undefined); // metadata stripped
-  assert.strictEqual(colObj.documents[0]._v, undefined);
+  assert.strictEqual(colObj.documents[0]._v, undefined); // internal metadata stripped
 
   // ── Test 2: Database.exportJSON() ───────────────────────────────────────────
   console.log('✔ Test 2: Database.exportJSON() (multi-collection & filter)');
@@ -91,11 +91,11 @@ async function runTests() {
 
   // Test overwrite mode
   await users.importJSON([
-    { id: 'u3', name: 'Charlie', email: 'charlie@test.com', role: 'qa' }
+    { id: 'usr000000000003', name: 'Charlie', email: 'charlie@test.com', role: 'qa' }
   ], { mode: 'overwrite' });
   assert.strictEqual(users.count(), 1);
-  assert.strictEqual(users.findById('u1'), null);
-  assert.strictEqual(users.findById('u3')?.name, 'Charlie');
+  assert.strictEqual(users.findById('usr000000000001'), null);
+  assert.strictEqual(users.findById('usr000000000003')?.name, 'Charlie');
   assert.strictEqual(users.findBy('email', 'charlie@test.com').length, 1);
 
   // ── Test 5: Database.importJSON() atomic import ─────────────────────────────
@@ -103,11 +103,11 @@ async function runTests() {
   const dumpToImport = {
     collections: {
       users: [
-        { id: 'u1', name: 'Alice', email: 'alice@test.com', role: 'admin' },
-        { id: 'u2', name: 'Bob',   email: 'bob@test.com',   role: 'dev' }
+        { id: 'usr000000000001', name: 'Alice', email: 'alice@test.com', role: 'admin' },
+        { id: 'usr000000000002', name: 'Bob',   email: 'bob@test.com',   role: 'dev' }
       ],
       products: [
-        { id: 'p3', title: 'Mouse', category: 'electronics', price: 29 }
+        { id: 'prd000000000003', title: 'Mouse', category: 'electronics', price: 29 }
       ]
     }
   };
@@ -127,17 +127,17 @@ async function runTests() {
     await db.importJSON({
       collections: {
         users: [
-          { id: 'u99', name: 'Zoe', email: 'zoe@test.com', role: 'dev' }
+          { id: 'usr000000000099', name: 'Zoe', email: 'zoe@test.com', role: 'dev' }
         ],
         products: [
-          { id: 'p1', title: 'Duplicate Laptop', category: 'electronics' } // duplicate key error!
+          { id: 'prd000000000001', title: 'Duplicate Laptop', category: 'electronics' } // duplicate key error!
         ]
       }
     }, { mode: 'insert' });
     assert.fail('Should have thrown duplicate error');
   } catch (err) {
     // Verify Zoe was NOT inserted due to transaction rollback
-    assert.strictEqual(users.findById('u99'), null);
+    assert.strictEqual(users.findById('usr000000000099'), null);
     assert.strictEqual(users.findBy('email', 'zoe@test.com').length, 0);
   }
 

@@ -31,10 +31,10 @@ async function main() {
   // ── INSERT ───────────────────────────────────────────────────────────────
   console.log('\n── INSERT ──');
   const users = db.collection('test_users');
-  await users.insert({ id: 'u1', name: 'Ana López',   role: 'admin', age: 28 });
-  await users.insert({ id: 'u2', name: 'Carlos Ruiz', role: 'dev',   age: 34 });
-  await users.insert({ id: 'u3', name: 'Bea Peña',    role: 'dev',   age: 22 });
-  await users.insert({ id: 'u4', name: 'Diego Mora',  role: 'admin', age: 45 });
+  await users.insert({ id: 'usr000000000001', name: 'Ana López',   role: 'admin', age: 28 });
+  await users.insert({ id: 'usr000000000002', name: 'Carlos Ruiz', role: 'dev',   age: 34 });
+  await users.insert({ id: 'usr000000000003', name: 'Bea Peña',    role: 'dev',   age: 22 });
+  await users.insert({ id: 'usr000000000004', name: 'Diego Mora',  role: 'admin', age: 45 });
   console.log('count:', users.count()); // 4
 
   // ── findBy index O(1) ────────────────────────────────────────────────────
@@ -51,28 +51,28 @@ async function main() {
 
   // ── UPDATE index auto-maintained ─────────────────────────────────────────
   console.log('\n── UPDATE + index ──');
-  await users.update('u3', { role: 'lead' });
+  await users.update('usr000000000003', { role: 'lead' });
   console.log('devs after update:', users.findBy('role', 'dev').map(u => u.name));
   console.log('leads:', users.findBy('role', 'lead').map(u => u.name));
 
   // ── DELETE index auto-maintained ─────────────────────────────────────────
   console.log('\n── DELETE + index ──');
-  await users.delete('u2');
+  await users.delete('usr000000000002');
   console.log('devs after delete:', users.findBy('role', 'dev').length); // 0
 
   // ── TRANSACTION rollback (stores + indexes) ───────────────────────────────
   console.log('\n── TRANSACTION rollback ──');
   const accounts = db.collection('test_accounts');
-  await accounts.insert({ id: 'accA', holder: 'Ana', balance: 1000 });
+  await accounts.insert({ id: 'acc000000000001', holder: 'Ana', balance: 1000 });
 
   try {
     await db.transaction(async (tx) => {
       const col = tx.collection('test_accounts');
-      await col.update('accA', { balance: -9999, holder: 'HACKED' });
+      await col.update('acc000000000001', { balance: -9999, holder: 'HACKED' });
       throw new Error('forced rollback');
     });
   } catch {
-    const doc = accounts.findById('accA');
+    const doc = accounts.findById('acc000000000001');
     console.log('balance after rollback:', doc?.balance);   // 1000
     console.log('holder after rollback:', doc?.holder);     // Ana
     console.log('Ana via index:', accounts.findBy('holder', 'Ana').length); // 1

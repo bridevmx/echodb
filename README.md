@@ -14,9 +14,10 @@
 | Feature | Description |
 |---|---|
 | ⚡ **RAM-first reads** | All queries served directly from in-memory Maps in **~0 ms**, without network roundtrips. |
+| 🚀 **PocketBase Parity** | 100% compatible 15-char IDs (`[a-z0-9]{15}`), canonical `created`/`updated` timestamps, `getOne`, `getList`, `.expand()`, and batch export. |
 | 👤 **Built-in Registration** | Create new accounts programmatically via static `EchoEntriesDB.register()`. |
 | 🔐 **Double-Layer Encryption** | Optional end-to-end encryption layer (AES-256-GCM + PBKDF2) so not even storage admins can read data. |
-| ⚡ **Secondary Indexes $O(1)$** | Declare indexes on any collection field for instant $O(1)$ lookups. |
+| ⚡ **Secondary & Unique Indexes $O(1)$** | Declare indexes on any collection field with optional unique constraint for instant $O(1)$ lookups and integrity. |
 | 🔍 **Chainable Query Builder** | Fluent query API supporting `.where()`, `.sortBy()`, `.limit()`, and `.offset()`. |
 | 🛡️ **Atomic Transactions** | Thread-safe, serialized transactions with automatic RAM rollback on errors. |
 | 💾 **Disk WAL Durability** | Write-Ahead Log guarantees zero data loss across process crashes or server restarts. |
@@ -132,7 +133,7 @@ main();
 ```javascript
 const users = db.collection('users');
 
-// INSERT — auto-generates UUIDv4 id if omitted
+// INSERT — auto-generates canonical PocketBase 15-char ID ([a-z0-9]{15}) if omitted
 const user = await users.insert({
   name: 'Alice',
   role: 'admin',
@@ -140,7 +141,7 @@ const user = await users.insert({
 });
 
 // READ BY ID — O(1) lookup
-const foundUser = users.findById(user.id);
+const foundUser = users.findById(user.id); // or users.getOne(user.id)
 
 // READ WITH PREDICATE — O(n) scan
 const admins = users.find(u => u.role === 'admin');
@@ -148,12 +149,12 @@ const firstAdmin = users.findOne(u => u.role === 'admin');
 const allUsers = users.all();
 const totalCount = users.count();
 
-// UPDATE — shallow merge & increments version counter (_v)
+// UPDATE — updates fields and automatically refreshes updated timestamp
 await users.update(user.id, { age: 29 });
 
-// UPSERT — inserts if id does not exist, updates if it exists
+// UPSERT — inserts if id does not exist, updates if it exists (requires valid 15-char ID if passed)
 await users.upsert({
-  id: 'usr_custom_101',
+  id: 'usr000000000101',
   name: 'Bob',
   role: 'developer'
 });
@@ -162,44 +163,136 @@ await users.upsert({
 const deleted = await users.delete(user.id);
 ```
 
-Each document stored in `echodb` automatically includes system metadata fields:
+Each document stored in `echodb` uses canonical PocketBase metadata fields:
 
 ```json
 {
-  "id": "385fec34-8bfd-424f-9f59-e5f722df8be8",
+  "id": "m8x3z9a1b2c3d4e",
   "name": "Alice",
-  "_col": "users",
-  "_id": "385fec34-8bfd-424f-9f59-e5f722df8be8",
-  "_type": "op",
-  "_op": "INSERT",
-  "_v": 1,
-  "_eeId": "row_99218",
-  "_createdAt": "2026-09-03T18:40:00.000Z",
-  "_updatedAt": "2026-09-03T18:40:00.000Z"
+  "role": "admin",
+  "age": 28,
+  "created": "2026-09-04T12:00:00.000Z",
+  "updated": "2026-09-04T12:00:00.000Z"
 }
 ```
 
 ---
 
-### 2. Secondary Indexes $O(1)$
+### 2. PocketBase SDK Query Parity & Relation Expand
 
-By default, filtering via `.find(fn)` performs a full scan over all documents in RAM. Declare secondary indexes to make exact-match lookups instantaneous ($O(1)$).
+EchoDB implements the exact read methods from the official PocketBase SDK with in-memory $O(1)$ relational expansion:
 
 ```javascript
-// Declare indexes before or after inserting documents
-db.createIndex('users', 'email');
-db.createIndex('users', 'status');
+const credits = db.collection('credits');
+const customers = db.collection('customers');
+
+// 1. getOne(id, { expand }) — O(1) lookup with relation expand
+const credit = credits.getOne('c8x3z2a1b9q0p12', { expand: 'customerId' });
+console.log(credit.expand.customerId.name); // Access expanded customer directly
+
+// 2. getFirstListItem(filter, { expand })
+const activeStaff = users.getFirstListItem(u => u.role === 'staff');
+const userByEmail = users.getFirstListItem('email', 'alice@example.com');
+const userByObj   = users.getFirstListItem({ role: 'admin' });
+
+// 3. getFullList({ filter, sort, expand }) — supports PocketBase sort syntax
+const topCredits = credits.getFullList({
+  sort: '-created', // PocketBase style: '-' for desc, '+' or none for asc
+  expand: 'customerId'
+});
+
+// 4. getList(page, perPage, options) — returns standard PocketBase paginated shape
+const pageResult = credits.getList(1, 20, { sort: '-created' });
+console.log(pageResult);
+// {
+//   page: 1,
+//   perPage: 20,
+//   totalItems: 142,
+//   totalPages: 8,
+//   items: [...]
+// }
+```
+
+---
+
+### 3. Secondary & Unique Indexes $O(1)$
+
+Declare secondary indexes to make lookups instantaneous ($O(1)$). Use `{ unique: true }` to enforce database-level uniqueness across documents:
+
+```javascript
+// Secondary index
+db.createIndex('users', 'role');
+
+// Unique index — throws immediately in O(1) if value is duplicate
+db.createIndex('users', 'email', { unique: true });
+db.createIndex('customers', 'phone', { unique: true });
 
 const users = db.collection('users');
 
-// O(1) array result lookup
-const activeUsers = users.findBy('status', 'active');
+// Instant O(1) lookup
+const user = users.findOneBy('email', 'alice@example.com');
 
-// O(1) single result lookup
-const userByEmail = users.findOneBy('email', 'alice@example.com');
+// Throws [EchoDB] Unique constraint violation if email already exists:
+try {
+  await users.insert({ name: 'Impostor', email: 'alice@example.com' });
+} catch (err) {
+  console.error(err.message);
+}
 ```
 
-*Note: Indexes are maintained automatically during `insert()`, `update()`, `upsert()`, `delete()`, transactions, and re-syncs.*
+*Note: Indexes and unique constraints are fully transactional: if a `db.transaction()` rolls back, all unique index entries are atomically reverted.*
+
+---
+
+### 4. Lightweight Schema Contracts & SQLite Zero-Values Coercion
+
+PocketBase relies on SQLite, which requires typed values instead of JavaScript `undefined`. EchoDB allows registering optional lightweight schemas for automatic zero-value coercion and PocketBase migration file generation:
+
+```javascript
+db.defineSchema('customers', {
+  name:   { type: 'text', required: true },
+  phone:  { type: 'text', required: true, unique: true },
+  points: { type: 'number', default: 0 },
+  active: { type: 'bool', default: true },
+  notes:  { type: 'text', default: '' },
+  tier:   { type: 'select', options: ['REGULAR', 'SILVER', 'GOLD'], default: 'REGULAR' }
+});
+
+const customers = db.collection('customers');
+
+// Missing fields are automatically coerced to SQLite zero-values (0, "", false):
+const customer = await customers.insert({ name: 'Carlos', phone: '5512345678' });
+console.log(customer.points); // 0 (not undefined)
+console.log(customer.notes);  // "" (not undefined)
+console.log(customer.active); // true (default applied)
+
+// Generate PocketBase v0.23+ JS migration file:
+const migrationCode = db.generatePocketBaseMigration();
+// Outputs ready-to-run pb_migrations script!
+```
+
+---
+
+### 5. Native PocketBase Batch Export (`POST /api/batch`)
+
+Export your entire database partitioned into payloads formatted for PocketBase's transactional batch endpoint (`POST /api/batch`, introduced in v0.22+):
+
+```javascript
+// Generate batches of 100 requests (or custom batchSize)
+const batches = db.exportPocketBaseBatch({ batchSize: 100 });
+
+// Direct 1-click import into PocketBase:
+for (const batch of batches) {
+  await fetch('http://127.0.0.1:8090/api/batch', {
+    method: 'POST',
+    headers: {
+      'Authorization': `AdminOrUserToken`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(batch)
+  });
+}
+```
 
 ---
 

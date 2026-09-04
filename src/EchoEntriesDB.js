@@ -71,7 +71,9 @@ class EchoEntriesDB {
 
     // ── Secondary indexes ──────────────────────────────────────────────────
     // col → Map<field, Map<value, Set<id>>>
-    this._indexes  = new Map();
+    this._indexes      = new Map();
+    this._uniqueFields = new Map(); // col → Set<field>
+    this._schemas      = new Map(); // col → schemaDefinition
 
     // ── Drain & Mutex state ────────────────────────────────────────────────
     this._draining      = false;
@@ -169,23 +171,37 @@ class EchoEntriesDB {
    * @returns {Collection}
    */
   collection(name) {
-    if (!this._stores.has(name))  this._stores.set(name, new Map());
-    if (!this._indexes.has(name)) this._indexes.set(name, new Map());
-    return new Collection(name, this._stores.get(name), (op) => this._enqueue(op), this._indexes.get(name));
+    if (!this._stores.has(name))       this._stores.set(name, new Map());
+    if (!this._indexes.has(name))      this._indexes.set(name, new Map());
+    if (!this._uniqueFields.has(name)) this._uniqueFields.set(name, new Set());
+    return new Collection(
+      name,
+      this._stores.get(name),
+      (op) => this._enqueue(op),
+      this._indexes.get(name),
+      this._uniqueFields.get(name),
+      this
+    );
   }
 
   /**
    * Declare a secondary index on a collection field.
    * Must be called before inserting documents (or after a sync).
    *
-   * After calling this, use col.findBy(field, value) for O(1) lookups
-   * instead of col.find(d => d[field] === value) which is O(n).
-   *
    * @param {string} colName
    * @param {string} field
+   * @param {object} [opts]
+   * @param {boolean} [opts.unique=false]
    */
-  createIndex(colName, field) {
-    if (!this._indexes.has(colName)) this._indexes.set(colName, new Map());
+  createIndex(colName, field, opts = {}) {
+    if (!this._indexes.has(colName))       this._indexes.set(colName, new Map());
+    if (!this._uniqueFields.has(colName))  this._uniqueFields.set(colName, new Set());
+
+    const isUnique = Boolean(opts && opts.unique);
+    if (isUnique) {
+      this._uniqueFields.get(colName).add(field);
+    }
+
     const colIndex = this._indexes.get(colName);
     if (colIndex.has(field)) return; // already exists
 
@@ -195,7 +211,7 @@ class EchoEntriesDB {
     if (store) {
       for (const doc of store.values()) {
         const val = doc[field];
-        if (val === undefined) continue;
+        if (val === undefined || val === null) continue;
         const key = String(val);
         if (!fieldIndex.has(key)) fieldIndex.set(key, new Set());
         fieldIndex.get(key).add(doc.id);
@@ -205,13 +221,119 @@ class EchoEntriesDB {
   }
 
   /**
+   * Register a lightweight schema contract for a collection.
+   * Enables automatic SQLite zero-value coercion, validation, and PocketBase migration generation.
+   * Also automatically registers unique indexes for fields with `unique: true`.
+   *
+   * @param {string} colName
+   * @param {Record<string, { type: string, required?: boolean, default?: any, unique?: boolean, options?: string[], collection?: string }>} schema
+   */
+  defineSchema(colName, schema) {
+    if (!colName || typeof colName !== 'string') {
+      throw new Error('[EchoDB] defineSchema() requires a collection name string.');
+    }
+    if (!schema || typeof schema !== 'object') {
+      throw new Error('[EchoDB] defineSchema() requires a schema definition object.');
+    }
+
+    this._schemas.set(colName, schema);
+
+    // Auto-register indexes for unique or indexed fields
+    for (const [field, def] of Object.entries(schema)) {
+      if (def && typeof def === 'object') {
+        if (def.unique) {
+          this.createIndex(colName, field, { unique: true });
+        } else if (def.index) {
+          this.createIndex(colName, field, { unique: false });
+        }
+      }
+    }
+
+    return this;
+  }
+
+  /**
+   * Get the registered schema definition for a collection.
+   * @param {string} colName
+   * @returns {object|null}
+   */
+  getSchema(colName) {
+    return this._schemas.get(colName) ?? null;
+  }
+
+  /**
+   * Generate a PocketBase (v0.23+) JS migration file script from registered schemas.
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.migrationName]
+   * @returns {string} PocketBase JS migration script
+   */
+  generatePocketBaseMigration(opts = {}) {
+    const lines = [
+      `/// <reference path="../pb_data/types.d.ts" />`,
+      `migrate((app) => {`
+    ];
+
+    for (const [colName, schema] of this._schemas) {
+      lines.push(`  const ${colName} = new Collection({`);
+      lines.push(`    name: ${JSON.stringify(colName)},`);
+      lines.push(`    type: "base",`);
+      lines.push(`    fields: [`);
+      lines.push(`      { name: "id", type: "text", primaryKey: true, autogeneratePattern: "[a-z0-9]{15}" },`);
+
+      for (const [fieldName, def] of Object.entries(schema)) {
+        const pbType = mapToPbType(def.type);
+        const fieldConfig = {
+          name: fieldName,
+          type: pbType,
+          required: Boolean(def.required)
+        };
+        if (def.options && Array.isArray(def.options)) {
+          fieldConfig.values = def.options;
+        }
+        if (def.collection) {
+          fieldConfig.collectionId = def.collection;
+        }
+        lines.push(`      ${JSON.stringify(fieldConfig)},`);
+      }
+
+      lines.push(`      { name: "created", type: "autodate", onCreate: true },`);
+      lines.push(`      { name: "updated", type: "autodate", onCreate: true, onUpdate: true }`);
+      lines.push(`    ],`);
+
+      const uniqueFields = this._uniqueFields.get(colName) || new Set();
+      if (uniqueFields.size > 0) {
+        lines.push(`    indexes: [`);
+        for (const f of uniqueFields) {
+          lines.push(`      "CREATE UNIQUE INDEX \`idx_${colName}_${f}\` ON \`${colName}\` (\`${f}\`);",`);
+        }
+        lines.push(`    ]`);
+      } else {
+        lines.push(`    indexes: []`);
+      }
+
+      lines.push(`  });`);
+      lines.push(`  app.save(${colName});\n`);
+    }
+
+    lines.push(`}, (app) => {`);
+    for (const colName of this._schemas.keys()) {
+      lines.push(`  const collection = app.findCollectionByNameOrId(${JSON.stringify(colName)});`);
+      lines.push(`  if (collection) app.delete(collection);`);
+    }
+    lines.push(`});\n`);
+
+    return lines.join('\n');
+  }
+
+  /**
    * Atomic transaction — rolls back all RAM changes if fn throws.
    * WAL ops only committed on success.
    * Concurrent transactions are serialized safely via FIFO queue to guarantee atomic isolation.
    */
   async transaction(fn) {
     const execute = async () => {
-      // Snapshot RAM stores + indexes
+      // Snapshot RAM stores + indexes + unique fields
       const storeSnap = new Map();
       for (const [col, store] of this._stores) storeSnap.set(col, new Map(store));
 
@@ -224,6 +346,11 @@ class EchoEntriesDB {
           copy.set(field, fcopy);
         }
         indexSnap.set(col, copy);
+      }
+
+      const uniqueSnap = new Map();
+      for (const [col, uSet] of this._uniqueFields) {
+        uniqueSnap.set(col, new Set(uSet));
       }
 
       const buffer = [];
@@ -254,6 +381,16 @@ class EchoEntriesDB {
             this._indexes.set(col, snapIdx);
           }
         }
+        // Rollback unique field sets
+        for (const [col, snapUnique] of uniqueSnap) {
+          const liveUnique = this._uniqueFields.get(col);
+          if (liveUnique) {
+            liveUnique.clear();
+            for (const f of snapUnique) liveUnique.add(f);
+          } else {
+            this._uniqueFields.set(col, snapUnique);
+          }
+        }
         throw err;
       }
     };
@@ -270,7 +407,7 @@ class EchoEntriesDB {
    * @param {string[]} [opts.collections]      Subset of collection names to export (default: all)
    * @param {boolean}  [opts.pretty=false]     Format JSON with 2-space indentation
    * @param {boolean}  [opts.stringify=true]    Return JSON string (true) or plain JS object (false)
-   * @param {boolean}  [opts.excludeMeta=false] Omit system metadata fields (_col, _v, etc.)
+   * @param {boolean}  [opts.excludeMeta=false] Omit internal metadata fields (_v, _eeId)
    * @returns {string|object}
    */
   exportJSON(opts = {}) {
@@ -284,7 +421,7 @@ class EchoEntriesDB {
       if (filterCols && !filterCols.has(colName)) continue;
       collectionsObj[colName] = [...store.values()].map(doc => {
         if (!excludeMeta) return { ...doc };
-        const { _col, _id, _type, _op, _v, _eeId, _createdAt, _updatedAt, ...clean } = doc;
+        const { _v, _eeId, _col, _id, _type, _op, _createdAt, _updatedAt, ...clean } = doc;
         return clean;
       });
     }
@@ -296,6 +433,45 @@ class EchoEntriesDB {
     };
 
     return stringify ? JSON.stringify(payload, null, pretty ? 2 : undefined) : payload;
+  }
+
+  /**
+   * Export all database records partitioned into chunks formatted for PocketBase's
+   * transactional batch endpoint (POST /api/batch, introduced in v0.22+).
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.batchSize=100] Maximum operations per batch request
+   * @param {string[]} [opts.collections] Optional subset of collections to export
+   * @returns {Array<{ requests: Array<{ action: 'create', collection: string, body: object }> }>}
+   */
+  exportPocketBaseBatch(opts = {}) {
+    const batchSize = opts.batchSize || 100;
+    const filterCols = Array.isArray(opts.collections) ? new Set(opts.collections) : null;
+    const batches = [];
+    let currentRequests = [];
+
+    for (const [colName, store] of this._stores) {
+      if (filterCols && !filterCols.has(colName)) continue;
+      for (const doc of store.values()) {
+        const { _v, _eeId, _col, _id, _type, _op, _createdAt, _updatedAt, ...body } = doc;
+        currentRequests.push({
+          action: 'create',
+          collection: colName,
+          body
+        });
+
+        if (currentRequests.length >= batchSize) {
+          batches.push({ requests: currentRequests });
+          currentRequests = [];
+        }
+      }
+    }
+
+    if (currentRequests.length > 0) {
+      batches.push({ requests: currentRequests });
+    }
+
+    return batches;
   }
 
   /**
@@ -344,9 +520,10 @@ class EchoEntriesDB {
     await this._rebuildFromRows(rows);
     // Rebuild all declared indexes after sync
     for (const [col, colIdx] of this._indexes) {
+      const uFields = this._uniqueFields.get(col) || new Set();
       for (const field of colIdx.keys()) {
         colIdx.delete(field); // clear and rebuild
-        this.createIndex(col, field);
+        this.createIndex(col, field, { unique: uFields.has(field) });
       }
     }
   }
@@ -621,6 +798,35 @@ class EchoEntriesDB {
       this._opEeIds.set(col, opIds);
       this._opCount.set(col, opIds.length);
     }
+  }
+}
+
+function mapToPbType(type) {
+  switch (type) {
+    case 'number':
+    case 'int':
+    case 'float':
+      return 'number';
+    case 'bool':
+    case 'boolean':
+      return 'bool';
+    case 'json':
+      return 'json';
+    case 'relation':
+      return 'relation';
+    case 'select':
+      return 'select';
+    case 'email':
+      return 'email';
+    case 'url':
+      return 'url';
+    case 'date':
+    case 'datetime':
+      return 'date';
+    case 'text':
+    case 'string':
+    default:
+      return 'text';
   }
 }
 

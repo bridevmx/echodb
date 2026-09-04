@@ -47,7 +47,7 @@ async function runHighConcurrencyStressTest() {
   const seedT0 = Date.now();
   for (let i = 1; i <= 500; i++) {
     await usersCol.insert({
-      id: `usr_${i}`,
+      id: `usr${String(i).padStart(12, '0')}`,
       name: `User ${i}`,
       email: `user${i}@shop.com`,
       role: i <= 10 ? 'admin' : 'customer'
@@ -57,7 +57,7 @@ async function runHighConcurrencyStressTest() {
   const INITIAL_STOCK_PER_ITEM = 30;
   for (let p = 1; p <= 50; p++) {
     await productsCol.insert({
-      id: `prd_${p}`,
+      id: `prd${String(p).padStart(12, '0')}`,
       sku: `SKU-${1000 + p}`,
       name: `Premium Item ${p}`,
       price: Math.floor(Math.random() * 500) + 10,
@@ -86,7 +86,7 @@ async function runHighConcurrencyStressTest() {
   const tStart = Date.now();
 
   const userSimulations = Array.from({ length: CONCURRENT_USERS }, async (_, index) => {
-    const userId = `usr_${index + 1}`;
+    const userId = `usr${String(index + 1).padStart(12, '0')}`;
 
     try {
       // Action 1: Read O(1)
@@ -107,7 +107,7 @@ async function runHighConcurrencyStressTest() {
       stats.totalReadOps++;
 
       // Action 3: Purchase Transaction
-      const targetProductId = `prd_${(index % 15) + 1}`;
+      const targetProductId = `prd${String((index % 15) + 1).padStart(12, '0')}`;
       const tTx = Date.now();
       stats.totalTransactions++;
 
@@ -187,7 +187,7 @@ async function runHighConcurrencyStressTest() {
   console.log('\n🔍 DEBUG ANALYSIS OF INVENTORY & TRANSACTIONS:');
   let totalStockRemaining = 0;
   for (let p = 1; p <= 50; p++) {
-    const prd = productsCol.findById(`prd_${p}`);
+    const prd = productsCol.findById(`prd${String(p).padStart(12, '0')}`);
     totalStockRemaining += prd.stock;
   }
 

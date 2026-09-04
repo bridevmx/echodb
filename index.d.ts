@@ -37,20 +37,115 @@ export interface EchoEntriesDBOptions {
   batchWindowMs?: number;
 }
 
-/** Metadata automatically added to every stored document. */
+/** Canonical PocketBase-compatible document metadata automatically added to every stored document. */
 export interface DocMeta {
+  /** PocketBase-compatible 15-character lowercase alphanumeric identifier ([a-z0-9]{15}). */
   id: string;
-  _col: string;
-  _id: string;
-  _type: 'op' | 'snapshot';
-  _op: 'INSERT' | 'UPDATE' | 'DELETE';
-  _v: number;
-  _eeId: string | null;
-  _createdAt: string;
-  _updatedAt: string;
+  /** Canonical ISO-8601 UTC creation timestamp. */
+  created: string;
+  /** Canonical ISO-8601 UTC last update timestamp. */
+  updated: string;
+  /** Internal revision version counter. */
+  _v?: number;
+  /** Internal cloud row id. */
+  _eeId?: string | null;
+  /** Resolved relational objects populated via expand. */
+  expand?: Record<string, any>;
 }
 
 export type Predicate<T> = (doc: T & DocMeta) => boolean;
+
+export interface IndexOptions {
+  /** Enforce unique constraint across all documents in this collection. */
+  unique?: boolean;
+}
+
+export type FieldType =
+  | 'text'
+  | 'string'
+  | 'number'
+  | 'int'
+  | 'float'
+  | 'bool'
+  | 'boolean'
+  | 'json'
+  | 'relation'
+  | 'select'
+  | 'email'
+  | 'url'
+  | 'date'
+  | 'datetime';
+
+export interface FieldSchema {
+  type: FieldType;
+  required?: boolean;
+  unique?: boolean;
+  index?: boolean;
+  default?: any;
+  options?: string[];
+  collection?: string;
+}
+
+export type CollectionSchema = Record<string, FieldSchema>;
+
+export interface GetOneOptions {
+  /**
+   * Fields to expand into related document records.
+   * Accepts field name string ('customerId'), comma-separated ('customerId,shiftId'),
+   * array of fields (['customerId']), or object mapping field to collection ({ customerId: 'customers' }).
+   */
+  expand?: string | string[] | Record<string, string>;
+  /**
+   * Comma-separated list of fields to project in the response.
+   * Mirrors the PocketBase SDK `fields` option.
+   * Example: 'id,name,email' — only those fields will be present in the returned object.
+   */
+  fields?: string;
+}
+
+export interface GetListOptions<T> extends GetOneOptions {
+  /** Filter predicate function or equality object. */
+  filter?: Predicate<T> | Partial<T> | Record<string, unknown>;
+  /**
+   * Sort criteria. Supports PocketBase sort syntax:
+   * '-created' (descending), '+created' or 'created' (ascending), 'title:asc', 'title:desc',
+   * or comma-separated / array of sort keys.
+   */
+  sort?: string | string[];
+  /**
+   * When true, skip computing totalItems and totalPages (faster).
+   * Returned values will be -1 when skipTotal is set.
+   * Mirrors the PocketBase SDK `skipTotal` option.
+   */
+  skipTotal?: boolean;
+}
+
+export interface PocketBaseListResult<T> {
+  page: number;
+  perPage: number;
+  /** -1 when skipTotal: true was used. */
+  totalItems: number;
+  /** -1 when skipTotal: true was used. */
+  totalPages: number;
+  items: (T & DocMeta)[];
+}
+
+export interface PocketBaseBatchRequest {
+  action: 'create' | 'update' | 'delete' | 'upsert';
+  collection: string;
+  body: Record<string, unknown>;
+}
+
+export interface PocketBaseBatchPayload {
+  requests: PocketBaseBatchRequest[];
+}
+
+export interface PocketBaseBatchOptions {
+  /** Max operations per batch payload (default: 100). */
+  batchSize?: number;
+  /** Subset of collections to export (default: all). */
+  collections?: string[];
+}
 
 // ── Query builder ─────────────────────────────────────────────────────────────
 
@@ -80,7 +175,7 @@ export interface ExportOptions {
   pretty?: boolean;
   /** Return a JSON string if true, or a plain JavaScript object if false (default: true) */
   stringify?: boolean;
-  /** Strip internal metadata fields (_col, _v, _createdAt, etc.) from exported documents (default: false) */
+  /** Strip internal metadata fields (_v, _eeId) from exported documents (default: false) */
   excludeMeta?: boolean;
 }
 
@@ -106,7 +201,7 @@ export interface CollectionExportResult<T = Record<string, unknown>> {
 export interface DatabaseExportResult {
   version: number;
   exportedAt: string;
-  collections: Record<string, DocMeta[] | Record<string, unknown>[]>;
+  collections: Record<string, (DocMeta & Record<string, unknown>)[]>;
 }
 
 export interface DatabaseImportResult {
@@ -126,6 +221,36 @@ export class Collection<T extends Record<string, unknown> = Record<string, unkno
   // ── Reads O(1) ───────────────────────────────────────────────────────────
   findById(id: string): (T & DocMeta) | null;
 
+  // ── PocketBase Query Parity ──────────────────────────────────────────────
+  /**
+   * Fetch single record by ID with optional relation expansion and field projection.
+   * PocketBase SDK compatible method.
+   */
+  getOne(id: string, options?: GetOneOptions): (T & DocMeta) | null;
+
+  /**
+   * Fetch first record matching predicate, field value, or query object.
+   * Supports optional expand and field projection.
+   * PocketBase SDK compatible method.
+   */
+  getFirstListItem(
+    filterOrField: Predicate<T> | keyof T | Partial<T>,
+    valueOrOptions?: unknown,
+    maybeOptions?: GetOneOptions
+  ): (T & DocMeta) | null;
+
+  /**
+   * Fetch all records matching optional filter, sort, expand and field projection.
+   * PocketBase SDK compatible method.
+   */
+  getFullList(options?: GetListOptions<T>): (T & DocMeta)[];
+
+  /**
+   * Fetch paginated list of records matching PocketBase response format.
+   * PocketBase SDK compatible method. Supports skipTotal for faster queries.
+   */
+  getList(page?: number, perPage?: number, options?: GetListOptions<T>): PocketBaseListResult<T>;
+
   // ── Reads O(n) full scan ─────────────────────────────────────────────────
   find(predicate?: Predicate<T>): (T & DocMeta)[];
   findOne(predicate: Predicate<T>): (T & DocMeta) | null;
@@ -138,8 +263,15 @@ export class Collection<T extends Record<string, unknown> = Record<string, unkno
    * Requires db.createIndex(colName, field) first.
    * Falls back to O(n) scan with a warning if index doesn't exist.
    */
-  findBy(field: keyof T, value: unknown): (T & DocMeta)[];
-  findOneBy(field: keyof T, value: unknown): (T & DocMeta) | null;
+  findBy(field: keyof T | string, value: unknown): (T & DocMeta)[];
+  findOneBy(field: keyof T | string, value: unknown): (T & DocMeta) | null;
+
+  /**
+   * Declare a secondary index on this collection.
+   * @param field Field name to index
+   * @param opts Index options (e.g. { unique: true })
+   */
+  createIndex(field: keyof T | string, opts?: IndexOptions): void;
 
   // ── Chainable query builder ───────────────────────────────────────────────
   /**
@@ -150,9 +282,28 @@ export class Collection<T extends Record<string, unknown> = Record<string, unkno
   where(conditions: Partial<T & DocMeta>): Query<T>;
 
   // ── Writes (RAM-immediate + async persist to EE) ──────────────────────────
+  /**
+   * Create a new document — canonical PocketBase SDK method name.
+   * Auto-generates a 15-char PocketBase ID if none is provided.
+   * `insert()` is kept as a backward-compatible alias.
+   */
+  create(bodyParams: Partial<T> & { id?: string }, options?: GetOneOptions): Promise<T & DocMeta>;
+
+  /**
+   * Insert a new document.
+   * Alias for `create()` — kept for backward compatibility.
+   */
   insert(doc: Partial<T> & { id?: string }): Promise<T & DocMeta>;
-  update(id: string, updates: Partial<T>): Promise<T & DocMeta>;
-  upsert(doc: Partial<T> & { id: string }): Promise<T & DocMeta>;
+
+  /**
+   * Update a document by ID (PATCH semantics — partial merge).
+   * Canonical PocketBase SDK method name and signature.
+   * Supports optional expand and field projection in the response.
+   */
+  update(id: string, bodyParams: Partial<T>, options?: GetOneOptions): Promise<T & DocMeta>;
+
+  /** Upsert — insert if id does not exist, update if it does. */
+  upsert(doc: Partial<T> & { id?: string }): Promise<T & DocMeta>;
   delete(id: string): Promise<boolean>;
 
   /** Delete all documents in this collection. Returns count of deleted documents. */
@@ -190,17 +341,6 @@ export class EchoEntriesDB {
   /**
    * Create a new Echo Entries account.
    * Static — no existing instance needed.
-   *
-   * @example
-   *   const { emailConfirmationRequired } = await EchoEntriesDB.register({
-   *     email: 'user@example.com',
-   *     password: 'secure-password',
-   *     firstName: 'Ana',
-   *     lastName: 'López'
-   *   });
-   *   if (emailConfirmationRequired) {
-   *     console.log('Check your inbox and confirm your email first.');
-   *   }
    */
   static register(opts: RegisterOptions): Promise<RegisterResult>;
 
@@ -229,12 +369,31 @@ export class EchoEntriesDB {
    *
    * @example
    *   db.createIndex('posts', 'authorId');
-   *   col.findBy('authorId', 'usr_123');   // O(1)
+   *   db.createIndex('users', 'email', { unique: true });
    */
-  createIndex(colName: string, field: string): void;
+  createIndex(colName: string, field: string, opts?: IndexOptions): void;
 
   /**
-   * Atomic transaction — rolls back all RAM changes (stores + indexes) if fn throws.
+   * Register a lightweight schema contract for a collection.
+   * Enables automatic SQLite zero-value coercion, validation, and PocketBase migration generation.
+   * Also automatically registers unique indexes for fields with `unique: true`.
+   */
+  defineSchema(colName: string, schema: CollectionSchema): this;
+
+  /** Get registered schema definition for a collection. */
+  getSchema(colName: string): CollectionSchema | null;
+
+  /** Generate a PocketBase (v0.23+) JS migration script from registered schemas. */
+  generatePocketBaseMigration(opts?: { migrationName?: string }): string;
+
+  /**
+   * Export all database records partitioned into chunks formatted for PocketBase's
+   * transactional batch endpoint (POST /api/batch, introduced in v0.22+).
+   */
+  exportPocketBaseBatch(opts?: PocketBaseBatchOptions): PocketBaseBatchPayload[];
+
+  /**
+   * Atomic transaction — rolls back all RAM changes (stores + indexes + unique sets) if fn throws.
    * WAL ops are only committed on success.
    */
   transaction<R>(fn: (db: EchoEntriesDB) => Promise<R>): Promise<R>;

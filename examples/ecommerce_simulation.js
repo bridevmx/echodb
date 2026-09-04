@@ -91,23 +91,23 @@ async function runEcommerceSimulation() {
     const products = db.collection('products');
 
     // Insert Users
-    const u1 = await users.insert({ id: 'usr_c1', name: 'Alice Smith', email: 'alice@example.com', role: 'customer' });
-    const u2 = await users.insert({ id: 'usr_c2', name: 'Bob Jones',   email: 'bob@example.com',   role: 'customer' });
-    const u3 = await users.insert({ id: 'usr_s1', name: 'Seller Sam',  email: 'sam@seller.com',   role: 'seller' });
-    const u4 = await users.insert({ id: 'usr_a1', name: 'Admin Eva',   email: 'eva@admin.com',    role: 'admin' });
+    const u1 = await users.insert({ id: 'usr0000000000c1', name: 'Alice Smith', email: 'alice@example.com', role: 'customer' });
+    const u2 = await users.insert({ id: 'usr0000000000c2', name: 'Bob Jones',   email: 'bob@example.com',   role: 'customer' });
+    const u3 = await users.insert({ id: 'usr0000000000s1', name: 'Seller Sam',  email: 'sam@seller.com',   role: 'seller' });
+    const u4 = await users.insert({ id: 'usr0000000000a1', name: 'Admin Eva',   email: 'eva@admin.com',    role: 'admin' });
 
     // Insert Categories
-    const catTech = await categories.insert({ id: 'cat_tech', name: 'Electronics', slug: 'electronics' });
-    const catHome = await categories.insert({ id: 'cat_home', name: 'Home & Kitchen', slug: 'home-kitchen' });
+    const catTech = await categories.insert({ id: 'cat00000000tech', name: 'Electronics', slug: 'electronics' });
+    const catHome = await categories.insert({ id: 'cat00000000home', name: 'Home & Kitchen', slug: 'home-kitchen' });
 
     // Insert Products
-    const p1 = await products.insert({ id: 'prd_p1', sku: 'SKU-LAPTOP', name: 'Pro Laptop 15"', price: 1200, stock: 10, categoryId: catTech.id, status: 'active' });
-    const p2 = await products.insert({ id: 'prd_p2', sku: 'SKU-PHONE',  name: 'Smart Phone X',   price: 800,  stock: 25, categoryId: catTech.id, status: 'active' });
-    const p3 = await products.insert({ id: 'prd_p3', sku: 'SKU-MUG',    name: 'Coffee Mug',      price: 15,   stock: 100, categoryId: catHome.id, status: 'active' });
-    const p4 = await products.insert({ id: 'prd_p4', sku: 'SKU-OUT',    name: 'Discontinued Item', price: 50, stock: 0,   categoryId: catHome.id, status: 'inactive' });
+    const p1 = await products.insert({ id: 'prd0000000000p1', sku: 'SKU-LAPTOP', name: 'Pro Laptop 15"', price: 1200, stock: 10, categoryId: catTech.id, status: 'active' });
+    const p2 = await products.insert({ id: 'prd0000000000p2', sku: 'SKU-PHONE',  name: 'Smart Phone X',   price: 800,  stock: 25, categoryId: catTech.id, status: 'active' });
+    const p3 = await products.insert({ id: 'prd0000000000p3', sku: 'SKU-MUG',    name: 'Coffee Mug',      price: 15,   stock: 100, categoryId: catHome.id, status: 'active' });
+    const p4 = await products.insert({ id: 'prd0000000000p4', sku: 'SKU-OUT',    name: 'Discontinued Item', price: 50, stock: 0,   categoryId: catHome.id, status: 'inactive' });
 
     // Test Read APIs O(1) & O(n)
-    const findByIdRes = users.findById('usr_c1');
+    const findByIdRes = users.findById('usr0000000000c1');
     const findByRoleAdmin = users.findBy('role', 'admin');
     const findByRoleCustomer = users.findBy('role', 'customer');
     const findOneBySku = products.findOneBy('sku', 'SKU-PHONE');
@@ -115,8 +115,8 @@ async function runEcommerceSimulation() {
     const activeProducts = products.find(p => p.status === 'active');
 
     // Test Update & Upsert
-    await products.update('prd_p3', { price: 18 });
-    await products.upsert({ id: 'prd_p5', sku: 'SKU-DESK', name: 'Standing Desk', price: 350, stock: 5, categoryId: catHome.id, status: 'active' });
+    await products.update('prd0000000000p3', { price: 18 });
+    await products.upsert({ id: 'prd0000000000p5', sku: 'SKU-DESK', name: 'Standing Desk', price: 350, stock: 5, categoryId: catHome.id, status: 'active' });
 
     results.crud = {
       status: 'SUCCESS',
@@ -125,8 +125,8 @@ async function runEcommerceSimulation() {
       customerRoleCount: findByRoleCustomer.length,
       adminFound: findByRoleAdmin[0]?.name === 'Admin Eva',
       phoneSkuFound: findOneBySku?.name === 'Smart Phone X',
-      updatedMugPrice: products.findById('prd_p3')?.price === 18,
-      upsertedDesk: products.findById('prd_p5')?.name === 'Standing Desk'
+      updatedMugPrice: products.findById('prd0000000000p3')?.price === 18,
+      upsertedDesk: products.findById('prd0000000000p5')?.name === 'Standing Desk'
     };
 
     console.log(`✅ CRUD & Index checks passed. Total users: ${users.count()}, Total products: ${products.count()}\n`);
@@ -142,7 +142,7 @@ async function runEcommerceSimulation() {
     const products = db.collection('products');
 
     const techActiveDesc = products
-      .where({ categoryId: 'cat_tech', status: 'active' })
+      .where({ categoryId: 'cat00000000tech', status: 'active' })
       .sortBy('price', 'desc')
       .exec();
 
@@ -186,18 +186,18 @@ async function runEcommerceSimulation() {
       const txOrders    = tx.collection('orders');
       const txInvLogs   = tx.collection('inventory_logs');
 
-      const product = txProducts.findById('prd_p1');
+      const product = txProducts.findById('prd0000000000p1');
       if (!product || product.stock < 2) {
         throw new Error('Stock insufficient for transaction');
       }
 
       // 1. Deduct stock
-      await txProducts.update('prd_p1', { stock: product.stock - 2 });
+      await txProducts.update('prd0000000000p1', { stock: product.stock - 2 });
 
       // 2. Create Order
       const newOrder = await txOrders.insert({
-        customerId: 'usr_c1',
-        items: [{ productId: 'prd_p1', qty: 2, price: 1200 }],
+        customerId: 'usr0000000000c1',
+        items: [{ productId: 'prd0000000000p1', qty: 2, price: 1200 }],
         totalAmount: 2400,
         status: 'completed'
       });
@@ -205,7 +205,7 @@ async function runEcommerceSimulation() {
 
       // 3. Create Inventory Log
       await txInvLogs.insert({
-        productId: 'prd_p1',
+        productId: 'prd0000000000p1',
         change: -2,
         reason: 'order_sale',
         orderId: newOrder.id
@@ -216,10 +216,10 @@ async function runEcommerceSimulation() {
     const orders = db.collection('orders');
     const logs = db.collection('inventory_logs');
 
-    const updatedLaptop = products.findById('prd_p1');
+    const updatedLaptop = products.findById('prd0000000000p1');
     const createdOrder = orders.findById(orderId);
     const createdLog = logs.findOne(l => l.orderId === orderId);
-    const customerOrders = orders.findBy('customerId', 'usr_c1');
+    const customerOrders = orders.findBy('customerId', 'usr0000000000c1');
 
     results.transactionCommit = {
       status: 'SUCCESS',
@@ -241,9 +241,9 @@ async function runEcommerceSimulation() {
   try {
     const products = db.collection('products');
     const orders = db.collection('orders');
-    const initialLaptopStock = products.findById('prd_p1').stock;
+    const initialLaptopStock = products.findById('prd0000000000p1').stock;
     const initialOrdersCount = orders.count();
-    const initialIndexedOrdersCount = orders.findBy('customerId', 'usr_c2').length;
+    const initialIndexedOrdersCount = orders.findBy('customerId', 'usr0000000000c2').length;
 
     let transactionFailedAsExpected = false;
 
@@ -253,12 +253,12 @@ async function runEcommerceSimulation() {
         const txOrders   = tx.collection('orders');
 
         // Mutate stock in RAM
-        await txProducts.update('prd_p1', { stock: 0 });
+        await txProducts.update('prd0000000000p1', { stock: 0 });
 
         // Insert new order for customer 2
         await txOrders.insert({
-          customerId: 'usr_c2',
-          items: [{ productId: 'prd_p1', qty: 99, price: 1200 }],
+          customerId: 'usr0000000000c2',
+          items: [{ productId: 'prd0000000000p1', qty: 99, price: 1200 }],
           totalAmount: 118800,
           status: 'pending'
         });
@@ -274,9 +274,9 @@ async function runEcommerceSimulation() {
       }
     }
 
-    const laptopStockAfterRollback = products.findById('prd_p1').stock;
+    const laptopStockAfterRollback = products.findById('prd0000000000p1').stock;
     const ordersCountAfterRollback = orders.count();
-    const customer2OrdersAfterRollback = orders.findBy('customerId', 'usr_c2').length;
+    const customer2OrdersAfterRollback = orders.findBy('customerId', 'usr0000000000c2').length;
 
     results.transactionRollback = {
       status: transactionFailedAsExpected &&
@@ -310,8 +310,8 @@ async function runEcommerceSimulation() {
     console.log('Enqueuing 25 product reviews rapidly...');
     for (let i = 1; i <= 25; i++) {
       await reviews.insert({
-        id: `rev_${i}`,
-        productId: i % 2 === 0 ? 'prd_p1' : 'prd_p2',
+        id: `rev${String(i).padStart(12, '0')}`,
+        productId: i % 2 === 0 ? 'prd0000000000p1' : 'prd0000000000p2',
         rating: (i % 5) + 1,
         comment: `Automated review test #${i} for product`,
         author: `User ${i}`
@@ -326,7 +326,7 @@ async function runEcommerceSimulation() {
     await db.flush();
     const flushTimeMs = Date.now() - tFlush;
 
-    const p1Reviews = reviews.findBy('productId', 'prd_p1');
+    const p1Reviews = reviews.findBy('productId', 'prd0000000000p1');
     const rating5Reviews = reviews.findBy('rating', 5);
 
     results.batchAndWal = {
@@ -375,10 +375,10 @@ async function runEcommerceSimulation() {
       restoredProducts: freshProducts.count(), // expected 5
       restoredOrders: freshOrders.count(),     // expected 1
       restoredReviews: freshReviews.count(),   // expected 25
-      checkLaptopStock: freshProducts.findById('prd_p1')?.stock, // expected 8
-      checkLaptopPrice: freshProducts.findById('prd_p1')?.price, // expected 1200
-      customer1OrdersCount: freshOrders.findBy('customerId', 'usr_c1').length, // expected 1
-      product1ReviewsCount: freshReviews.findBy('productId', 'prd_p1').length // expected 13
+      checkLaptopStock: freshProducts.findById('prd0000000000p1')?.stock, // expected 8
+      checkLaptopPrice: freshProducts.findById('prd0000000000p1')?.price, // expected 1200
+      customer1OrdersCount: freshOrders.findBy('customerId', 'usr0000000000c1').length, // expected 1
+      product1ReviewsCount: freshReviews.findBy('productId', 'prd0000000000p1').length // expected 13
     };
 
     await db2.close();
