@@ -92,28 +92,39 @@ Every document in EchoDB follows the canonical PocketBase schema:
 ```javascript
 const users = db.collection('users');
 
-// INSERT: Auto-assigns valid 15-char PB ID if omitted
-const alice = await users.insert({
+// CREATE — canonical PocketBase SDK method name. Auto-generates 15-char PB ID if omitted.
+// Accepts optional { expand, fields } as second argument.
+const alice = await users.create({
   name: 'Alice Smith',
   email: 'alice@example.com',
   role: 'admin'
 });
-console.log(alice.id); // e.g. "m8x3z2a1b9q0p12"
+console.log(alice.id);      // e.g. "m8x3z2a1b9q0p12"
 console.log(alice.created); // "2026-09-04T12:00:00.000Z"
+
+// create() with fields projection — only requested fields in response
+const slim = await users.create(
+  { name: 'Bob', email: 'bob@example.com', role: 'dev' },
+  { fields: 'id,name' }
+);
+// slim → { id: '...', name: 'Bob' }
+
+// INSERT — alias for create(), kept for backward compatibility
+const carol = await users.insert({ name: 'Carol', email: 'carol@example.com', role: 'dev' });
 
 // READ BY ID (O(1) in-memory Map lookup)
 const user = users.findById(alice.id);
 
-// UPDATE: Shallow merges changes, updates 'updated' timestamp
-const updated = await users.update(alice.id, {
-  role: 'superadmin'
-});
+// UPDATE: PATCH semantics — partial merge, refreshes 'updated' timestamp.
+// Accepts optional { expand, fields } as third argument.
+const updated = await users.update(alice.id, { role: 'superadmin' });
+const updatedSlim = await users.update(alice.id, { role: 'superadmin' }, { fields: 'id,role' });
 
 // UPSERT: Inserts if id does not exist, updates if it does (validates 15-char ID)
-const bob = await users.upsert({
-  id: 'usr000000000bob',
-  name: 'Bob',
-  email: 'bob@example.com'
+const dave = await users.upsert({
+  id: 'usr000000000dav',
+  name: 'Dave',
+  email: 'dave@example.com'
 });
 
 // DELETE: Removes from RAM, cleans indexes, logs DELETE in WAL
@@ -124,18 +135,22 @@ const wasDeleted = await users.delete(alice.id); // returns boolean
 
 ## 5. PocketBase SDK Query Parity & Relation Expand
 
-EchoDB supports the query and expansion methods of the official PocketBase SDK:
+EchoDB supports the query and expansion methods of the official PocketBase SDK. All methods accept `{ expand }` and `{ fields }` options:
 
-### `getOne(id, { expand })`
+### `getOne(id, { expand, fields })`
 ```javascript
 const credits = db.collection('credits');
 
 // Resolves customerId -> customers collection in RAM O(1)
 const credit = credits.getOne('c8x3z2a1b9q0p12', { expand: 'customerId' });
 console.log(credit.expand.customerId.name); // "Alice Smith"
+
+// fields projection — only include specified fields
+const slim = credits.getOne('c8x3z2a1b9q0p12', { fields: 'id,amount,created' });
+// slim → { id: '...', amount: 50, created: '...' }
 ```
 
-### `getFirstListItem(filterOrField, value, { expand })`
+### `getFirstListItem(filterOrField, value, { expand, fields })`
 ```javascript
 // By predicate function:
 const firstAdmin = users.getFirstListItem(u => u.role === 'admin');
@@ -147,16 +162,17 @@ const userByEmail = users.getFirstListItem('email', 'alice@example.com');
 const leadDev = users.getFirstListItem({ role: 'dev', lead: true });
 ```
 
-### `getFullList({ filter, sort, expand })`
+### `getFullList({ filter, sort, expand, fields })`
 ```javascript
 // Supports PocketBase sort format: '-field' (desc), '+field' or 'field' (asc), 'field:asc/desc'
 const allCredits = credits.getFullList({
   sort: '-created',
-  expand: 'customerId'
+  expand: 'customerId',
+  fields: 'id,amount,expand' // optional projection
 });
 ```
 
-### `getList(page, perPage, { filter, sort, expand })`
+### `getList(page, perPage, { filter, sort, expand, fields, skipTotal })`
 ```javascript
 // Returns PocketBase paginated response structure:
 const paged = credits.getList(1, 20, { sort: '-created' });
@@ -165,6 +181,10 @@ console.log(paged.perPage);    // 20
 console.log(paged.totalItems); // e.g. 85
 console.log(paged.totalPages); // 5
 console.log(paged.items);      // array of documents
+
+// skipTotal: true — skip totalItems/totalPages computation (faster)
+// Returns totalItems: -1 and totalPages: -1 (mirrors PocketBase SDK behavior)
+const fast = credits.getList(1, 20, { skipTotal: true });
 ```
 
 ---

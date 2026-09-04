@@ -133,12 +133,18 @@ main();
 ```javascript
 const users = db.collection('users');
 
-// INSERT — auto-generates canonical PocketBase 15-char ID ([a-z0-9]{15}) if omitted
-const user = await users.insert({
+// CREATE — canonical PocketBase SDK method name; auto-generates 15-char ID if omitted
+const user = await users.create({
   name: 'Alice',
   role: 'admin',
   age: 28
 });
+// create() also accepts options: { expand, fields }
+const projected = await users.create({ name: 'Bob', role: 'dev', age: 25 }, { fields: 'id,name' });
+// projected → { id: '...', name: 'Bob' }  (only those two fields returned)
+
+// INSERT — alias for create(), kept for backward compatibility
+const user2 = await users.insert({ name: 'Carol', role: 'admin', age: 30 });
 
 // READ BY ID — O(1) lookup
 const foundUser = users.findById(user.id); // or users.getOne(user.id)
@@ -149,13 +155,16 @@ const firstAdmin = users.findOne(u => u.role === 'admin');
 const allUsers = users.all();
 const totalCount = users.count();
 
-// UPDATE — updates fields and automatically refreshes updated timestamp
+// UPDATE — PATCH semantics (partial merge); refreshes updated timestamp
+// Third arg options: { expand, fields } — same as create()
 await users.update(user.id, { age: 29 });
+const updated = await users.update(user.id, { age: 30 }, { fields: 'id,age' });
+// updated → { id: '...', age: 30 }
 
 // UPSERT — inserts if id does not exist, updates if it exists (requires valid 15-char ID if passed)
 await users.upsert({
   id: 'usr000000000101',
-  name: 'Bob',
+  name: 'Dave',
   role: 'developer'
 });
 
@@ -180,28 +189,34 @@ Each document stored in `echodb` uses canonical PocketBase metadata fields:
 
 ### 2. PocketBase SDK Query Parity & Relation Expand
 
-EchoDB implements the exact read methods from the official PocketBase SDK with in-memory $O(1)$ relational expansion:
+EchoDB implements the exact read methods from the official PocketBase SDK with in-memory $O(1)$ relational expansion. All methods support `{ expand }` and `{ fields }` options:
 
 ```javascript
 const credits = db.collection('credits');
 const customers = db.collection('customers');
 
-// 1. getOne(id, { expand }) — O(1) lookup with relation expand
+// 1. getOne(id, { expand, fields }) — O(1) lookup
 const credit = credits.getOne('c8x3z2a1b9q0p12', { expand: 'customerId' });
-console.log(credit.expand.customerId.name); // Access expanded customer directly
+console.log(credit.expand.customerId.name); // resolved from RAM
 
-// 2. getFirstListItem(filter, { expand })
+// fields projection — only include specified fields in response
+const slim = credits.getOne('c8x3z2a1b9q0p12', { fields: 'id,amount,created' });
+// slim → { id: '...', amount: 50, created: '...' }
+
+// 2. getFirstListItem(filter, { expand, fields })
 const activeStaff = users.getFirstListItem(u => u.role === 'staff');
 const userByEmail = users.getFirstListItem('email', 'alice@example.com');
 const userByObj   = users.getFirstListItem({ role: 'admin' });
 
-// 3. getFullList({ filter, sort, expand }) — supports PocketBase sort syntax
+// 3. getFullList({ filter, sort, expand, fields }) — supports PocketBase sort syntax
 const topCredits = credits.getFullList({
   sort: '-created', // PocketBase style: '-' for desc, '+' or none for asc
-  expand: 'customerId'
+  expand: 'customerId',
+  fields: 'id,amount,expand'
 });
 
-// 4. getList(page, perPage, options) — returns standard PocketBase paginated shape
+// 4. getList(page, perPage, { sort, filter, expand, fields, skipTotal })
+//    returns standard PocketBase paginated shape
 const pageResult = credits.getList(1, 20, { sort: '-created' });
 console.log(pageResult);
 // {
@@ -211,6 +226,10 @@ console.log(pageResult);
 //   totalPages: 8,
 //   items: [...]
 // }
+
+// skipTotal: true — skip computing totalItems/totalPages (faster)
+// Returns totalItems: -1 and totalPages: -1 (mirrors PocketBase SDK behavior)
+const fast = credits.getList(1, 20, { sort: '-created', skipTotal: true });
 ```
 
 ---
@@ -449,7 +468,7 @@ const deletedCount = await usersCollection.clear();
 | `collections` | `string[]` | all | Subset of collection names to export or import. |
 | `pretty` | `boolean` | `false` | Format JSON with 2-space indentation. |
 | `stringify` | `boolean` | `true` | Return JSON string if `true`, JS object if `false`. |
-| `excludeMeta` | `boolean` | `false` | Strip internal metadata (`_col`, `_v`, `_eeId`, etc.). |
+| `excludeMeta` | `boolean` | `false` | Strip internal metadata (`_v`, `_eeId`) from exported documents. |
 
 ---
 
@@ -498,17 +517,17 @@ async function run() {
   // Strongly typed collection
   const products: Collection<Product> = db.collection<Product>('products');
 
-  // Insert typed document
-  const doc = await products.insert({
+  // Insert typed document — use create() (canonical) or insert() (alias)
+  const doc = await products.create({
     name: 'Keyboard',
     price: 49.99,
     stock: 20,
     category: 'tech'
   });
 
-  // Typed results include DocMeta metadata (_id, _v, _createdAt, etc.)
+  // Typed results include DocMeta fields (id, created, updated, _v)
   const item: (Product & DocMeta) | null = products.findById(doc.id);
-  console.log(item?.name, item?._v);
+  console.log(item?.name, item?.created);
 }
 ```
 
