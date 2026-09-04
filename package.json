@@ -1,6 +1,6 @@
 {
   "name": "@bridevmx/echodb",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "RAM-first document database backed by Echo Entries with PocketBase parity. Zero-dependency, append-only, atomic transactions, auto-compaction.",
   "main": "index.js",
   "types": "index.d.ts",
