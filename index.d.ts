@@ -3,14 +3,28 @@
 export interface EchoEntriesDBOptions {
   /**
    * Echo Entries account email.
-   * Not required when `memoryOnly: true`.
+   * Not required when `memoryOnly: true` or when `apiKey` is provided.
    */
   email?: string;
   /**
    * Echo Entries account password.
-   * Not required when `memoryOnly: true`.
+   * Not required when `memoryOnly: true` or when `apiKey` is provided.
    */
   password?: string;
+  /**
+   * Mataroa API key (primary host).
+   * If provided, requests use this Bearer token directly.
+   */
+  apiKey?: string;
+  /** Alias for apiKey. */
+  mataroaApiKey?: string;
+  /**
+   * Mataroa account username.
+   * If provided with password, automatically logs into Mataroa.
+   */
+  username?: string;
+  /** Alias for username. */
+  mataroaUsername?: string;
   /**
    * Run entirely in RAM without any network calls, WAL, or authentication.
    * Ideal for unit tests, CI/CD pipelines, and offline development.
@@ -320,17 +334,127 @@ export class Collection<T extends Record<string, unknown> = Record<string, unkno
 }
 
 export interface RegisterOptions {
-  email: string;
-  password: string;
+  /** Account email used on both hosts. Required for Echo Entries backup. */
+  email?: string;
+  /** Account password. If omitted, cryptographically generated via CSPRNG (24 chars). */
+  password?: string;
+  /** Subdomain/username for Mataroa. If omitted, safely derived from email. */
+  username?: string;
+  /** Client-side E2EE secret. If omitted, 256-bit CSPRNG hex is generated. */
+  encryptionSecret?: string;
+  /** Optional first name for Echo Entries profile. */
   firstName?: string;
+  /** Optional last name for Echo Entries profile. */
   lastName?: string;
 }
 
+export interface SynchronizedCredentials {
+  username: string;
+  email: string | null;
+  password: string;
+  apiKey: string | null;
+  encryptionSecret: string;
+}
+
+export interface HostStatus {
+  provider: 'mataroa' | 'echoentries';
+  url: string;
+  blogUrl?: string;
+  apiKey?: string | null;
+  userId?: string | null;
+  emailConfirmationRequired?: boolean;
+  status: string;
+}
+
 export interface RegisterResult {
+  success: boolean;
+  /** Sychronized credentials across primary and backup hosts. */
+  credentials: SynchronizedCredentials;
+  /** Configuration object ready for new EchoEntriesDB(config). */
+  config: {
+    apiKey: string | null;
+    email: string | null;
+    password: string;
+    encryptionSecret: string;
+  };
+  /** Preformatted .env file template ready to paste. */
+  env: string;
+  /** Code snippet to initialize the database in developer's application. */
+  codeSnippet: string;
+  /** Status and URLs for primary and backup hosts. */
+  hosts: {
+    primary: HostStatus;
+    backup: HostStatus;
+  };
+  /** Echo Entries user record (legacy backward compatibility). */
   user: Record<string, unknown> | null;
+  /** Echo Entries session record (legacy backward compatibility). */
   session: Record<string, unknown> | null;
-  /** True when EE requires the user to confirm their email before logging in. */
+  /** True when Echo Entries requires email confirmation before login works. */
   emailConfirmationRequired: boolean;
+  /** Mataroa API key (primary host). */
+  apiKey?: string | null;
+  /** Mataroa registration details. */
+  mataroa?: Record<string, unknown> | null;
+}
+
+// ── MataroaClient ─────────────────────────────────────────────────────────────
+
+export interface MataroaPage {
+  title: string;
+  slug: string;
+  body: string;
+  is_hidden: boolean;
+  url: string;
+}
+
+export interface MataroaPost {
+  title: string;
+  slug: string;
+  body: string;
+  published_at?: string | null;
+  url: string;
+}
+
+export class MataroaClient {
+  apiKey: string | null;
+  baseUrl: string;
+
+  constructor(opts?: { apiKey?: string; baseUrl?: string });
+
+  static register(params: { username: string; password: string; email?: string }): Promise<{
+    username: string;
+    email: string;
+    apiKey: string;
+    sessionid: string;
+  }>;
+
+  static login(params: { username: string; password: string }): Promise<{
+    username: string;
+    apiKey: string;
+    sessionid: string;
+  }>;
+
+  static fetchApiKeyFromDocs(sessionid: string, csrftoken?: string): Promise<string>;
+
+  request(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', endpoint: string, body?: unknown): Promise<{
+    ok: boolean;
+    data: any;
+    status: number;
+    ms: number;
+  }>;
+
+  listPages(): Promise<MataroaPage[]>;
+  getPage(slug: string): Promise<MataroaPage>;
+  createPage(params: { title: string; slug: string; body?: string; is_hidden?: boolean }): Promise<any>;
+  updatePage(slug: string, params?: { title?: string; body?: string; is_hidden?: boolean }): Promise<any>;
+  deletePage(slug: string): Promise<any>;
+
+  listPosts(): Promise<MataroaPost[]>;
+  getPost(slug: string): Promise<MataroaPost>;
+  createPost(params: { title: string; body?: string; published_at?: string | null }): Promise<any>;
+  updatePost(slug: string, params?: { title?: string; body?: string; published_at?: string | null }): Promise<any>;
+  deletePost(slug: string): Promise<any>;
 }
 
 // ── EchoEntriesDB ─────────────────────────────────────────────────────────────
@@ -339,10 +463,15 @@ export class EchoEntriesDB {
   constructor(opts: EchoEntriesDBOptions);
 
   /**
-   * Create a new Echo Entries account.
-   * Static — no existing instance needed.
+   * Create a new synchronized account on Mataroa (primary) and Echo Entries (backup).
+   * Static — no existing instance needed. Generates secure credentials if omitted.
    */
-  static register(opts: RegisterOptions): Promise<RegisterResult>;
+  static register(opts?: RegisterOptions): Promise<RegisterResult>;
+
+  /**
+   * Alias for register: provision a synchronized dual-host account.
+   */
+  static provisionAccount(opts?: RegisterOptions): Promise<RegisterResult>;
 
   /** Authenticate, load WAL, sync from EE, drain pending ops. */
   init(): Promise<this>;
@@ -412,4 +541,5 @@ export class EchoEntriesDB {
   ): Promise<DatabaseImportResult>;
 }
 
+export { EchoEntriesDB as EchoDB, EchoEntriesDB as MataroaDB };
 export default EchoEntriesDB;

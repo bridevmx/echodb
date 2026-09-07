@@ -1,7 +1,7 @@
 # echodb
 
-> **RAM-first document database backed by Echo Entries.**  
-> Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · Offline/CI mode · TypeScript support.
+> **RAM-first document database backed by Mataroa (Primary) and Echo Entries (Backup).**  
+> Dual-Host Write · Zero-dependency · Append-only log · Atomic transactions · End-to-End Encryption · Secondary Indexes · Auto-compaction · Offline/CI mode · TypeScript support.
 
 [![npm](https://img.shields.io/npm/v/@bridevmx/echodb)](https://www.npmjs.com/package/@bridevmx/echodb)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
@@ -14,15 +14,16 @@
 | Feature | Description |
 |---|---|
 | ⚡ **RAM-first reads** | All queries served directly from in-memory Maps in **~0 ms**, without network roundtrips. |
+| 🌐 **Primary + Backup Dual-Host** | **Mataroa (https://mataroa.blog)** acts as the primary cloud host with **Echo Entries** as redundant backup. Ops are written to both simultaneously. |
 | 🚀 **PocketBase Parity** | 100% compatible 15-char IDs (`[a-z0-9]{15}`), canonical `created`/`updated` timestamps, `getOne`, `getList`, `.expand()`, and batch export. |
-| 👤 **Built-in Registration** | Create new accounts programmatically via static `EchoEntriesDB.register()`. |
+| 👤 **Built-in Registration** | Create new accounts programmatically via static `EchoEntriesDB.register()` or `MataroaClient.register()`. |
 | 🔐 **Double-Layer Encryption** | Optional end-to-end encryption layer (AES-256-GCM + PBKDF2) so not even storage admins can read data. |
 | ⚡ **Secondary & Unique Indexes $O(1)$** | Declare indexes on any collection field with optional unique constraint for instant $O(1)$ lookups and integrity. |
 | 🔍 **Chainable Query Builder** | Fluent query API supporting `.where()`, `.sortBy()`, `.limit()`, and `.offset()`. |
 | 🛡️ **Atomic Transactions** | Thread-safe, serialized transactions with automatic RAM rollback on errors. |
 | 💾 **Disk WAL Durability** | Write-Ahead Log guarantees zero data loss across process crashes or server restarts. |
-| 📦 **Bulk Writes** | Entire batch of ops flushed in a single HTTP request to Echo Entries (PostgREST bulk insert). |
-| 📦 **Auto-Compaction** | Automatically folds operation logs into consolidated snapshots to optimize cloud storage. |
+| 📦 **Bulk Writes** | Batch of ops flushed in parallel to Mataroa (hidden pages) and Echo Entries (PostgREST bulk insert). |
+| 📦 **Auto-Compaction** | Automatically folds operation logs into consolidated snapshots on both hosts to optimize storage. |
 | 🧪 **Offline / CI mode** | `memoryOnly: true` runs 100% in RAM — no credentials, no network, no WAL. Perfect for tests. |
 | 📦 **Zero Dependencies** | Powered purely by Node.js built-in modules (`node:crypto`, `fs`). No external npm packages. |
 | 📘 **TypeScript Support** | Full type definitions included (`index.d.ts`) with generic collection support. |
@@ -41,36 +42,89 @@ npm install @bridevmx/echodb
 
 ---
 
-## Account Registration
+## Account Registration & Provisioning
 
-You can create a new Echo Entries account programmatically using the static `EchoEntriesDB.register()` method without needing an existing database instance.
+You can create accounts programmatically using the static `EchoEntriesDB.provisionAccount()` (or `EchoEntriesDB.register()`) method without needing an existing database instance. This provisions a **single synchronized account** across **Mataroa (Primary host)** and **Echo Entries (Backup host)** simultaneously, with automatic CSPRNG security generation:
 
 ```javascript
 const { EchoEntriesDB } = require('@bridevmx/echodb');
 
-async function registerAccount() {
+async function setupDatabase() {
   try {
-    const result = await EchoEntriesDB.register({
-      email:    'newuser@example.com',
-      password: 'SecurePassword123!',
-      firstName: 'Jane',
-      lastName:  'Doe'
+    const result = await EchoEntriesDB.provisionAccount({
+      email:     'dev@mycompany.com',
+      // password, username, and encryptionSecret are optional:
+      // if omitted, EchoDB generates a 24-char CSPRNG password and 256-bit E2EE key!
     });
 
-    console.log('User created:', result.user.id);
+    console.log('✅ Synchronized Account Created:');
+    console.log('API Key:', result.credentials.apiKey);
+    console.log('Password:', result.credentials.password);
+    console.log('E2EE Secret:', result.credentials.encryptionSecret);
 
-    if (result.emailConfirmationRequired) {
-      console.log('✉️ Check your inbox and confirm your email address before logging in.');
-    } else {
-      console.log('✅ Account ready for login!');
-    }
+    // Save ready-made .env template to disk
+    const fs = require('fs');
+    fs.writeFileSync('.env', result.env);
+    console.log('Saved .env file successfully!');
+
+    // Or initialize the DB directly using result.config:
+    const db = new EchoEntriesDB(result.config);
+    await db.init();
   } catch (err) {
-    console.error('Registration failed:', err.message);
+    console.error('Provisioning failed:', err.message);
   }
 }
 
-registerAccount();
+setupDatabase();
 ```
+
+### What `provisionAccount()` returns:
+
+```javascript
+{
+  success: true,
+
+  // 1. Synchronized credentials for both hosts
+  credentials: {
+    username: 'm8a3f120',
+    email: 'dev@mycompany.com',
+    password: '...',         // 24-char CSPRNG password
+    apiKey: '...',           // Mataroa Bearer token
+    encryptionSecret: '...'  // 256-bit CSPRNG hex key
+  },
+
+  // 2. Ready-to-pass config object
+  config: {
+    apiKey: '...',
+    email: 'dev@mycompany.com',
+    password: '...',
+    encryptionSecret: '...'
+  },
+
+  // 3. Pre-formatted .env template with security comments
+  env: `
+# ========================================================
+# EchoDB Credentials (Mataroa Primary + Echo Entries Backup)
+# WARNING: NEVER commit this file to version control (.gitignore)
+# ========================================================
+ECHODB_API_KEY="..."
+ECHODB_EMAIL="dev@mycompany.com"
+ECHODB_PASSWORD="..."
+ECHODB_ENCRYPTION_SECRET="..."
+  `.trim(),
+
+  // 4. Code snippet for developer convenience
+  codeSnippet: `...`,
+
+  // 5. Host status
+  hosts: {
+    primary: { provider: 'mataroa', url: 'https://mataroa.blog', status: 'active' },
+    backup:  { provider: 'echoentries', url: 'https://veorhexddrwlwxtkuycb.supabase.co', status: 'active' }
+  }
+}
+```
+
+> **Security First**: All generated passwords use OS-level CSPRNG (`crypto.randomInt` and `crypto.randomBytes`), guarantee high entropy across 4 character classes, and pass Mataroa's Django similarity validation. Sensitive secrets are never logged.
 
 ---
 
@@ -478,17 +532,19 @@ const deletedCount = await usersCollection.clear();
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `email` | `string` | required* | Echo Entries account email. |
-| `password` | `string` | required* | Echo Entries account password. |
-| `memoryOnly` | `boolean` | `false` | Run 100% in RAM — no auth, no WAL, no network. `email`/`password` not needed. |
+| `email` | `string` | optional* | Account email (Echo Entries backup and Mataroa registration). |
+| `password` | `string` | optional* | Account password. |
+| `apiKey` | `string` | `null` | Direct Mataroa Bearer API key (primary host). |
+| `username` | `string` | `null` | Mataroa username (for auto-login without apiKey). |
+| `memoryOnly` | `boolean` | `false` | Run 100% in RAM — no auth, no WAL, no network. Perfect for tests & CI. |
 | `encryptionSecret` | `string` | `null` | Extra secret key for double-layer E2EE encryption. |
 | `walPath` | `string` | `'./.echodb_wal.json'` | Local disk path for the Write-Ahead Log file. |
 | `autoSyncMs` | `number` | `300000` | Periodical sync interval from cloud in ms (`0` = disabled). |
 | `compactEvery` | `number` | `20` | Ops threshold per collection to trigger auto-compaction. |
-| `batchSize` | `number` | `10` | Maximum ops per bulk POST to Echo Entries. |
+| `batchSize` | `number` | `10` | Maximum ops per bulk drain cycle. |
 | `batchWindowMs` | `number` | `8` | Ms window to accumulate writes before firing background batch. |
 
-*`email` and `password` are required unless `memoryOnly: true`.
+*\*`email` + `password` or `apiKey` is required unless `memoryOnly: true`.*
 
 ---
 
@@ -497,7 +553,7 @@ const deletedCount = await usersCollection.clear();
 `echodb` ships with complete type definitions (`index.d.ts`).
 
 ```typescript
-import EchoEntriesDB, { Collection, DocMeta } from '@bridevmx/echodb';
+import EchoEntriesDB, { Collection, DocMeta, MataroaClient } from '@bridevmx/echodb';
 
 interface Product {
   name: string;
@@ -509,7 +565,8 @@ interface Product {
 async function run() {
   const db = new EchoEntriesDB({
     email: 'user@example.com',
-    password: 'password123'
+    password: 'password123',
+    apiKey: process.env.MATAROA_API_KEY // optional direct Mataroa key
   });
 
   await db.init();
@@ -533,18 +590,20 @@ async function run() {
 
 ---
 
-## Architecture Overview
+## Architecture Overview (Dual-Host Storage)
 
 ```
 col.insert(doc)
   │
   ├── 1. Apply to RAM Map immediately  (~0 ms)
   ├── 2. Push to local WAL on disk     (sync write, ~0.1 ms)
-  └── 3. Background drain (batch window):
-           Single bulk POST → Echo Entries (N rows in 1 HTTP request)
-           When ops threshold reached → Compact:
-             PATCH single snapshot entry
-             DELETE obsolete op-entries in parallel
+  └── 3. Background drain (batch window) — DUAL WRITE in parallel:
+           ├── PRIMARY:  Mataroa (https://mataroa.blog) hidden pages
+           └── BACKUP:   Echo Entries PostgREST bulk insert
+           
+         When ops threshold reached → DUAL-COMPACT:
+           ├── PRIMARY:  PATCH Mataroa snapshot page & DELETE op pages
+           └── BACKUP:   PATCH Echo Entries snapshot row & DELETE op rows
 ```
 
 > In `memoryOnly` mode, steps 2 and 3 are skipped entirely.

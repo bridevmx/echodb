@@ -1,7 +1,7 @@
 {
   "name": "@bridevmx/echodb",
-  "version": "2.0.1",
-  "description": "RAM-first document database backed by Echo Entries with PocketBase parity. Zero-dependency, append-only, atomic transactions, auto-compaction.",
+  "version": "2.1.0",
+  "description": "RAM-first document database backed by Mataroa and Echo Entries with PocketBase parity. Zero-dependency, append-only, atomic transactions, auto-compaction.",
   "main": "index.js",
   "types": "index.d.ts",
   "exports": {
@@ -23,10 +23,11 @@
   ],
   "engines": { "node": ">=18.0.0" },
   "scripts": {
-    "test": "node test/test_export_import.js && node test/test_pocketbase_parity.js"
+    "test": "node test/test_export_import.js && node test/test_pocketbase_parity.js && node test/test_mataroa.js"
   },
   "keywords": [
     "echodb",
+    "mataroa",
     "echo-entries",
     "supabase",
     "nosql",

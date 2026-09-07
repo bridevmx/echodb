@@ -27,16 +27,16 @@ EchoDB is a hybrid **RAM-first + Append-Only Document Database with PocketBase P
    - **SDK Read Parity**: `getOne()`, `getFirstListItem()`, `getFullList()`, `getList()` with `{ page, perPage, totalItems, totalPages, items }`.
    - **In-Memory Expand**: Cross-collection foreign key resolution in RAM.
    - **Batch Migration**: Direct export to PocketBase's transactional `POST /api/batch`.
-3. **Writes (Immediate RAM + Local WAL + Background Sync)**:
+3. **Dual-Host Writes (Immediate RAM + Local WAL + Background Parallel Sync)**:
    - When `insert()`, `update()`, `upsert()`, or `delete()` is called:
      1. Validated and coerced against schema (if defined) & checked for unique constraints.
      2. Updated in RAM `Map` and secondary indexes immediately.
      3. Appended synchronously to the local disk **Write-Ahead Log (WAL)** file (`.echodb_wal.json`) to prevent data loss on crashes.
-     4. Queued and drained in background batches to the **Echo Entries cloud API**.
+     4. Queued and drained in background batches concurrently to **Mataroa (Primary host)** as hidden pages and to **Echo Entries (Backup host)**.
 4. **Double-Layer Encryption (E2EE)**:
-   - **Outer Layer**: AES-256-GCM encrypted using the user ID (compatible with Echo Entries UI).
+   - **Outer Layer**: AES-256-GCM encrypted using the user ID (compatible with Echo Entries UI and Mataroa).
    - **Inner Layer (Optional `encryptionSecret`)**: AES-256-GCM + PBKDF2 applied *before* outer encryption for zero-knowledge privacy.
-5. **Auto-Compaction**: Periodically collapses historical operation logs into single snapshot entries on the cloud once threshold (`compactEvery`) is reached.
+5. **Auto-Compaction**: Periodically collapses historical operation logs into single snapshot entries on both cloud hosts once threshold (`compactEvery`) is reached.
 6. **Zero External Dependencies**: Uses only standard Node.js built-ins (`node:crypto`, `node:fs`, `node:path`, `node:https`).
 
 ---
@@ -50,12 +50,12 @@ npm install @bridevmx/echodb
 
 ### CommonJS
 ```javascript
-const { EchoEntriesDB } = require('@bridevmx/echodb');
+const { EchoEntriesDB, MataroaClient } = require('@bridevmx/echodb');
 ```
 
 ### ES Modules / TypeScript
 ```typescript
-import EchoEntriesDB, { Collection, DocMeta, EchoEntriesDBOptions, Query } from '@bridevmx/echodb';
+import EchoEntriesDB, { Collection, DocMeta, EchoEntriesDBOptions, MataroaClient, Query } from '@bridevmx/echodb';
 ```
 
 ---
@@ -66,8 +66,10 @@ import EchoEntriesDB, { Collection, DocMeta, EchoEntriesDBOptions, Query } from 
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `email` | `string` | **required\*** | Echo Entries account email. |
-| `password` | `string` | **required\*** | Echo Entries account password. |
+| `email` | `string` | optional* | Account email (Echo Entries backup and Mataroa auto-setup). |
+| `password` | `string` | optional* | Account password. |
+| `apiKey` | `string` | `undefined` | Mataroa Bearer API key (primary host). |
+| `username` | `string` | `undefined` | Mataroa username (optional auto-login). |
 | `memoryOnly` | `boolean` | `false` | Run 100% in RAM — no auth, no WAL, no network. Perfect for tests & CI. |
 | `encryptionSecret` | `string` | `undefined` | Optional extra secret for inner AES-256-GCM layer. |
 | `walPath` | `string` | `'./.echodb_wal.json'` | Local disk path for the WAL file. |
@@ -76,7 +78,31 @@ import EchoEntriesDB, { Collection, DocMeta, EchoEntriesDBOptions, Query } from 
 | `batchSize` | `number` | `10` | Max parallel cloud requests per drain cycle. |
 | `batchWindowMs` | `number` | `8` | Milliseconds window to batch pending writes. |
 
-*\*`email` and `password` are required unless `memoryOnly: true` is set.*
+*\*`email` + `password` or `apiKey` is required unless `memoryOnly: true` is set.*
+
+---
+
+## 3.1 Dual-Host Account Provisioning (`provisionAccount`)
+
+To create an account synchronized across **Mataroa (Primary)** and **Echo Entries (Backup)** simultaneously with CSPRNG security:
+
+```javascript
+const { EchoEntriesDB } = require('@bridevmx/echodb');
+
+const result = await EchoEntriesDB.provisionAccount({
+  email: 'developer@example.com'
+  // password and encryptionSecret are optional: auto-generated via CSPRNG if omitted!
+});
+
+// result provides:
+// - result.credentials (apiKey, email, password, encryptionSecret)
+// - result.config (ready to pass to new EchoEntriesDB(result.config))
+// - result.env (preformatted .env string with security comments)
+// - result.hosts (primary & backup status)
+
+// Save .env file:
+require('fs').writeFileSync('.env', result.env);
+```
 
 ---
 
